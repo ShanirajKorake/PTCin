@@ -29,7 +29,7 @@ const formatDateForDisplay = (dateString) => {
 export default function History({ theme, onNavigateToForm }) {
     const [invoices, setInvoices] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState(null); // NEW: State for errors
+    const [error, setError] = useState(null); // State for errors
     const [expandedId, setExpandedId] = useState(null);
     const [previewData, setPreviewData] = useState(null);
     const [isDeleting, setIsDeleting] = useState(false); // For local loading state
@@ -259,6 +259,10 @@ export default function History({ theme, onNavigateToForm }) {
                     const isDue = balanceDue > 0.01;
                     const totalBalanceFormatted = balanceDue.toLocaleString('en-IN', { minimumFractionDigits: 2 });
                     const dateFormatted = formatDateForDisplay(formData.billDate); 
+                    
+                    // NEW: Construct the container type string
+                    const containerTypeString = `${formData.loadDirection || ''} ${formData.vehicleCount || 0}x${formData.containerSize || ''}`;
+
 
                     return (
                         <div key={invoice.id} className={`rounded-xl shadow-md transition-all duration-300 ${cardClasses} overflow-hidden ${isDeleting && isExpanded ? 'opacity-50' : ''}`}>
@@ -282,14 +286,21 @@ export default function History({ theme, onNavigateToForm }) {
                             {isExpanded && (
                                 <div className={`p-4 border-t ${isLight ? 'border-gray-300' : 'border-gray-600'} space-y-4`}>
 
-                                    {/* 1. Trip Details (DD-MM-YYYY format applied) */}
-                                    <h4 className={`font-bold mt-2 ${titleClasses}`}>Trip Details</h4>
+                                    {/* 1. Trip Details (DD-MM-YYYY format applied, plus Container Type) */}
+                                    <h4 className={`font-bold mt-2 ${titleClasses}`}>Trip & Load Details</h4>
                                     <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
                                         <p className={`font-semibold ${subTextClasses}`}>Address:</p>
                                         <p className={`${subTextClasses}`}>{formData.partyAddress}</p>
-                                        <p className={`font-semibold ${subTextClasses}`}>Trip:</p>
+                                        
+                                        <p className={`font-semibold ${subTextClasses}`}>Load Type:</p>
+                                        <p className={`${subTextClasses} `}>
+                                            {containerTypeString}
+                                        </p>
+                                        
+                                        <p className={`font-semibold ${subTextClasses}`}>Trip Route:</p>
                                         <p className={`${subTextClasses}`}>{formData.from} to {formData.to} to {formData.backTo}</p>
-                                        <p className={`font-semibold ${subTextClasses}`}>Dates:</p>
+                                        
+                                        <p className={`font-semibold ${subTextClasses}`}>Trip Dates:</p>
                                         <p className={`${subTextClasses}`}>
                                             {formatDateForDisplay(formData.loadingDate)} to {formatDateForDisplay(formData.unloadingDate)}
                                         </p>

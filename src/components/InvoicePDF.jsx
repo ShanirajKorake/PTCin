@@ -98,9 +98,8 @@ export default function InvoicePDF({ formData, vehicles, theme, handleDone}) {
         const PAGE_WIDTH = 210;
         const MARGIN = 10;
         
-        // 7 Logical Columns:
-        // [0:LR No. (15), 1:Vehicle/Container No. (30), 2:Charge Name (30), 3:Charge Amt (30), 4:Total Freight (30), 5:Total Advance (30), 6:Balance Due (25)]
-        const COL_WIDTHS = [15, 30, 30, 30, 30, 30, 25]; 
+        // 7 Logical Columns: [0:LR No. (15), 1:Vehicle/Container No. (30), 2:Charge Name (30), 3:Charge Amt (30), 4:Total Freight (30), 5:Total Advance (30), 6:Balance Due (25)]
+        const COL_WIDTHS = [15, 35, 25, 30, 30, 30, 25]; 
 
         // --- Custom Colors ---
         const COLOR_WHITE = [255, 255, 255];
@@ -157,6 +156,10 @@ export default function InvoicePDF({ formData, vehicles, theme, handleDone}) {
         };
 
         const { charges, totalFreightAgg, totalAdvanceAgg, totalBalanceAgg } = getVehicleChargesData();
+        
+        // --- Calculate Container Type String ---
+        const containerTypeString = `${formData.loadDirection || ''} ${formData.vehicleCount || 0}x${formData.containerSize || ''}`;
+
 
         // --- 3. Build the SINGLE LARGE TABLE Body (7 logical columns) ---
         const ALL_TABLE_BODY = [];
@@ -166,47 +169,42 @@ export default function InvoicePDF({ formData, vehicles, theme, handleDone}) {
             {
                 content: `Bill To: ${formData.partyName || ''}`,
                 colSpan: 7,
-                styles: {
-                    fontStyle: 'bold',
-                    fontSize: 14,
-                    fillColor: COLOR_WHITE,
-                    textColor: [0, 0, 0],
-                    halign: 'left',
-                    minCellHeight: 6
-                }
+                styles: { fontStyle: 'bold', fontSize: 14, fillColor: COLOR_WHITE, textColor: [0, 0, 0], halign: 'left', minCellHeight: 6 }
             }
         ]);
         ALL_TABLE_BODY.push([
             {
                 content: `Address: ${formData.partyAddress || 'KALAMBOLI'}`,
                 colSpan: 7,
-                styles: {
-                    fontStyle: 'bold',
-                    fontSize: 10,
-                    fillColor: COLOR_WHITE,
-                    textColor: [0, 0, 0],
-                    halign: 'left',
-                    minCellHeight: 6
-                }
+                styles: { fontStyle: 'bold', fontSize: 10, fillColor: COLOR_WHITE, textColor: [0, 0, 0], halign: 'left', minCellHeight: 6 }
             }
         ]);
 
         // --- SECTION 2: TRIP DETAILS (2 rows) ---
-        // Row 1: Loading Date and Unloading Date
+        
+        // Row 1: Loading Date, Unloading Date, Container Type (3 EQUAL COLUMNS)
         ALL_TABLE_BODY.push([
+            // Column 1: Loading Date (ColSpan 2)
             {
-                content: `Loading Date: ${formatDateForDisplay(formData.loadingDate) || ''}`, // Apply format
-                colSpan: 3,
+                content: `Loading Date: ${formatDateForDisplay(formData.loadingDate) || ''}`,
+                colSpan: 2,
                 styles: { fontStyle: 'bold', fillColor: COLOR_WHITE, halign: 'left', fontSize: 10, textColor: [0, 0, 0] }
             },
+            // Column 2: Unloading Date (ColSpan 2)
             {
-                content: `Unloading Date: ${formatDateForDisplay(formData.unloadingDate) || ''}`, // Apply format
-                colSpan: 4,
-                styles: { fontStyle: 'bold', fillColor: COLOR_WHITE, halign: 'right', fontSize: 10, textColor: [0, 0, 0] }
+                content: `Unloading Date: ${formatDateForDisplay(formData.unloadingDate) || ''}`,
+                colSpan: 3,
+                styles: { fontStyle: 'bold', fillColor: COLOR_WHITE, halign: 'center', fontSize: 10, textColor: [0, 0, 0] }
+            },
+            // Column 3: Container Type (ColSpan 3)
+            {
+                content: `Container Type: ${containerTypeString}`,
+                colSpan: 2,
+                styles: { fontStyle: 'bold', fillColor: COLOR_WHITE, halign: 'right', fontSize: 10, textColor: [0, 0, 0] } // Highlight Type
             }
         ]);
 
-        // Row 2: Trip locations
+        // Row 2: Trip locations (ColSpan 2, 3, 2 - remains the same for trip locations)
         ALL_TABLE_BODY.push([
             {
                 content: `From: ${formData.from || ''}`,
@@ -267,7 +265,7 @@ export default function InvoicePDF({ formData, vehicles, theme, handleDone}) {
                         valign: 'top',
                         textColor: COLOR_RED,
                         fillColor: COLOR_WHITE,
-                        halign: 'center' // <-- FIX APPLIED HERE: Center alignment for LR data
+                        halign: 'center' 
                     }
                 });
             }
@@ -323,35 +321,23 @@ export default function InvoicePDF({ formData, vehicles, theme, handleDone}) {
             {
                 content: 'TOTAL (INR)',
                 colSpan: 4, 
-                styles: {
-                    fontStyle: 'bold', halign: 'right', fontSize: 10, fillColor: COLOR_LIGHT_GRAY,
-                    textColor: [50, 50, 50],
-                }
+                styles: { fontStyle: 'bold', halign: 'right', fontSize: 10, fillColor: COLOR_LIGHT_GRAY, textColor: [50, 50, 50], }
             },
             {
                 content: totalFreightAgg.toFixed(2),
-                styles: {
-                    fontStyle: 'bold', fontSize: 10, halign: 'right', fillColor: COLOR_LIGHT_GRAY,
-                    textColor: [50, 50, 50],
-                }
+                styles: { fontStyle: 'bold', fontSize: 10, halign: 'right', fillColor: COLOR_LIGHT_GRAY, textColor: [50, 50, 50], }
             },
             {
                 content: totalAdvanceAgg.toFixed(2),
-                styles: {
-                    fontStyle: 'bold', fontSize: 10, halign: 'right', fillColor: COLOR_LIGHT_GRAY,
-                    textColor: [50, 50, 50],
-                }
+                styles: { fontStyle: 'bold', fontSize: 10, halign: 'right', fillColor: COLOR_LIGHT_GRAY, textColor: [50, 50, 50], }
             },
             {
                 content: totalBalanceAgg.toFixed(2),
-                styles: {
-                    fontStyle: 'bold', fontSize: 10, halign: 'right', fillColor: COLOR_LIGHT_GRAY,
-                    textColor: [50, 50, 50],
-                }
+                styles: { fontStyle: 'bold', fontSize: 10, halign: 'right', fillColor: COLOR_LIGHT_GRAY, textColor: [50, 50, 50], }
             }
         ]);
 
-        // --- SECTION 5: TOTAL DUE IN WORDS (Combined into one row, Spanning 7 columns) ---
+        // --- SECTION 5: TOTAL DUE IN WORDS ---
         const totalDueAmount = totalBalanceAgg.toFixed(2);
         const totalDueWords = numberToWords(totalBalanceAgg);
 

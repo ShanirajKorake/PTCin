@@ -3,9 +3,8 @@ import { Plus, Trash2, ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 import InvoicePDF from "./InvoicePDF";
 import { Encoding } from '@capacitor/filesystem';
 import { 
-  saveNewInvoice, 
-  getInvoiceCounter, 
-  incrementInvoiceCounter, 
+  generateAndSaveInvoice, 
+  getInvoiceCounter,      
   formatInvoiceId,
   getInvoicesHistory
 } from "../services/dbService"; 
@@ -42,6 +41,10 @@ const initialFormData = {
     loadingDate: new Date().toISOString().split("T")[0],
     unloadingDate: new Date().toISOString().split("T")[0],
     warai: "0.00", 
+    // New structured fields
+    loadDirection: "Import", // Default to Import
+    vehicleCount: 1, // Default vehicle count
+    containerSize: "40", // Default container size
 };
 
 const initialVehicleEntry = {
@@ -83,12 +86,15 @@ export default function InvoiceForm({ theme, initialData, context }) {
   const [uniqueSuggestions, setUniqueSuggestions] = useState({}); 
   const [activeSuggestions, setActiveSuggestions] = useState([]); 
   const [activeField, setActiveField] = useState(null); 
+  
+  // Memoized current vehicle count for easy access
+  const currentVehicleCount = parseInt(formData.vehicleCount, 10) || 1;
 
 
-  // --- Logic to load the next sequential Invoice ID ---
+  // --- Logic to load the next sequential Invoice ID (for display only) ---
   const loadNewInvoiceId = async () => {
     try {
-        const nextCount = (await getInvoiceCounter()) + 1;
+        const nextCount = (await getInvoiceCounter()) + 1; 
         setFormData(prev => ({ 
             ...prev,
             invoiceNo: formatInvoiceId(nextCount), 
@@ -126,6 +132,7 @@ export default function InvoiceForm({ theme, initialData, context }) {
             from: new Set(),
             to: new Set(),
             backTo: new Set(),
+            containerSize: new Set(), // Suggestions for size
             lrNo: new Set(),
             vehicleNo: new Set(),
             containerNo: new Set(),
@@ -138,6 +145,7 @@ export default function InvoiceForm({ theme, initialData, context }) {
             data.from.add(fd.from);
             data.to.add(fd.to);
             data.backTo.add(fd.backTo);
+            data.containerSize.add(fd.containerSize); 
 
             invoice.vehicles.forEach(v => {
                 data.lrNo.add(v.lrNo);
@@ -161,6 +169,25 @@ export default function InvoiceForm({ theme, initialData, context }) {
     const totalWarai = vehicles.reduce((sum, v) => sum + parseFloat(v.warai || 0), 0);
     setFormData(prev => ({ ...prev, warai: totalWarai.toFixed(2).toString() }));
   }, [vehicles]);
+
+  // --- EFFECT 4: Synchronize Vehicle List with Vehicle Count ---
+  useEffect(() => {
+    const count = currentVehicleCount;
+    if (count > 0) {
+        setVehicles(prevVehicles => {
+            if (prevVehicles.length === count) return prevVehicles;
+
+            if (prevVehicles.length < count) {
+                // Add new vehicles
+                const newEntries = Array(count - prevVehicles.length).fill(initialVehicleEntry);
+                return [...prevVehicles, ...newEntries];
+            } else {
+                // Trim vehicles
+                return prevVehicles.slice(0, count);
+            }
+        });
+    }
+  }, [currentVehicleCount]); // Reruns when formData.vehicleCount changes
 
 
   // --- Suggestion Handlers ---
@@ -194,11 +221,17 @@ export default function InvoiceForm({ theme, initialData, context }) {
   const handleFormChange = (e) => {
     const { name, value } = e.target;
     
-    setFormData((prev) => ({ ...prev, [name]: value }));
+    // Special handling for vehicleCount to ensure it's a valid number >= 1
+    let processedValue = value;
+    if (name === 'vehicleCount') {
+        processedValue = Math.max(1, parseInt(value, 10) || 1);
+    }
+
+    setFormData((prev) => ({ ...prev, [name]: processedValue }));
     
     if (uniqueSuggestions[name]) {
         const suggestions = uniqueSuggestions[name].filter(item => 
-            item.toLowerCase().startsWith(value.toLowerCase())
+            item.toLowerCase().startsWith(processedValue.toLowerCase())
         );
         setActiveSuggestions(suggestions);
     } else {
@@ -246,17 +279,21 @@ export default function InvoiceForm({ theme, initialData, context }) {
   };
 
 
-  // --- Form Controls ---
+  // --- Form Controls (simplified - only for explicit adding/removing if count is manual) ---
   const addVehicle = () => {
-    const newVehicle = { ...initialVehicleEntry };
-    setVehicles([...vehicles, newVehicle]);
+      // Manual override increases vehicleCount state, triggering Effect 4
+      const newVehicle = { ...initialVehicleEntry };
+      setVehicles([...vehicles, newVehicle]);
+      setFormData(prev => ({ ...prev, vehicleCount: prev.vehicleCount + 1 }));
   };
 
   const removeVehicle = (index) => {
     if (vehicles.length > 1) {
       setVehicles(vehicles.filter((_, i) => i !== index));
+      setFormData(prev => ({ ...prev, vehicleCount: prev.vehicleCount - 1 }));
     }
   };
+
 
   // --- Post-Preview Done Action ---
   const handleDone = () => {
@@ -310,12 +347,11 @@ export default function InvoiceForm({ theme, initialData, context }) {
   };
 
 
-  // --- CORE SAVE/GENERATE FUNCTIONALITY (Modified for Loading/Retry) ---
+  // --- CORE SAVE/GENERATE FUNCTIONALITY (UPDATED TO INCLUDE ALERT) ---
   const coreSaveAndGenerate = async (dataToSave, isRetry = false) => {
     setIsSaving(true);
     setSaveError(null);
     
-    // Check for critical data validation
     if (dataToSave.formData.invoiceNo.includes("Load") || dataToSave.formData.invoiceNo.includes("ERR") || !dataToSave.formData.partyName || dataToSave.vehicles.length === 0) {
         alert("Please ensure Party Name is filled and the Invoice ID is valid.");
         setIsSaving(false);
@@ -323,39 +359,46 @@ export default function InvoiceForm({ theme, initialData, context }) {
     }
 
     try {
-        // 1. SAVE/REPLACE FULL RECORD TO STORAGE
-        const saveResult = await saveNewInvoice(dataToSave);
+        // Call the consolidated orchestration function
+        const saveResult = await generateAndSaveInvoice(dataToSave);
         
         if (saveResult.status === 'aborted') {
             setIsSaving(false);
             return; 
         }
-
-        if (saveResult.status === 'saved' && !isRetry) {
-            // 2. Only if NEW Invoice is SAVED: INCREMENT COUNTER
-            await incrementInvoiceCounter(); 
+        
+        // --- ALERT LOGIC ADDED ---
+        if (saveResult.status === 'updated') {
+            // Alert user that they updated an existing record
+            alert(`⚠️ Warning: Invoice ID ${saveResult.invoiceNo} already exists. The existing record has been updated with the current data.`);
+        }
+        // -------------------------
+        
+        // Update local state and data package with the FINAL, confirmed invoiceNo.
+        if (saveResult.status === 'saved' || saveResult.status === 'updated') {
+             const finalInvoiceNo = saveResult.invoiceNo;
+             dataToSave.formData.invoiceNo = finalInvoiceNo;
+             setFormData(prev => ({ ...prev, invoiceNo: finalInvoiceNo }));
         }
 
-        // Reset error state and retry data on success
         setRetryData(null);
         
-        // 3. PREPARE PDF DATA 
         const formattedVehicles = vehicles.map(formatVehicleDataForPDF);
         const filename = `Invoice_${dataToSave.formData.invoiceNo}_${new Date().getFullYear()}.pdf`;
         
         setPdfData({
             formData: dataToSave.formData,
             vehicles: formattedVehicles,
-            url: "data:application/pdf;base64,Base64_PDF_Content", 
+            url: "data:application/pdf;base64,Base64_PDF_Content", // Placeholder, replace with actual PDF generation
             filename: filename
         });
         
         setShowPreview(true);
 
     } catch (error) {
-        const errorMsg = "Error: Could not complete save/generate process.";
+        const errorMsg = "Error: Could not complete save/generate process. Check the console for details.";
         setSaveError(errorMsg);
-        setRetryData(dataToSave); // Store data for retry
+        setRetryData(dataToSave); 
         console.error("Save failed:", error);
         
     } finally {
@@ -363,7 +406,7 @@ export default function InvoiceForm({ theme, initialData, context }) {
     }
   };
 
-  // --- Main submission wrapper function ---
+  // --- Main submission wrapper function (Unchanged) ---
   const handleSaveAndGeneratePDF = (isRetry = false) => {
     
     const invoiceRecord = {
@@ -391,7 +434,7 @@ export default function InvoiceForm({ theme, initialData, context }) {
   // --------------------------------------------------------------------------
 
 
-  // --- DYNAMIC THEME CLASSES (Added disabled/loading state styles) ---
+  // --- DYNAMIC THEME CLASSES ---
   const isLight = theme === "light";
   const sectionContainerClasses = isLight ? "bg-indigo-50 p-4 rounded-2xl mb-5 shadow-sm border border-indigo-100" : "bg-gray-800 p-4 rounded-2xl mb-5 shadow-inner shadow-gray-700/50 border border-gray-700";
   const cardContainerClasses = isLight ? "bg-gray-50 p-4 rounded-2xl mb-4 shadow-sm border border-gray-200" : "bg-gray-700/50 p-4 rounded-2xl mb-4 shadow-sm border border-gray-600";
@@ -414,7 +457,7 @@ export default function InvoiceForm({ theme, initialData, context }) {
   // ------------------------------------
 
 
-  // --- SUGGESTION RENDERING COMPONENT (MOVED FORWARD TO FIX REFERENCE ERROR) ---
+  // --- SUGGESTION RENDERING COMPONENT ---
   const SuggestionDropdown = ({ fieldName, value, onSelect, vehicleIndex = null }) => {
     const showDropdown = activeField && 
                          activeField.name === fieldName && 
@@ -490,7 +533,8 @@ export default function InvoiceForm({ theme, initialData, context }) {
                       name="invoiceNo"
                       value={formData.invoiceNo}
                       onChange={handleFormChange}
-                      className={inputClasses + " font-bold " + (formData.invoiceNo.includes("P") ? "text-indigo-600" : "text-red-500")}
+                      // Use a different color if the ID is not the standard sequential format
+                      className={inputClasses + " font-bold " + (formData.invoiceNo.startsWith("P-") && !formData.invoiceNo.includes("ERR") ? "text-indigo-600" : "text-red-500")}
                     />
                 </div>
                 
@@ -510,11 +554,73 @@ export default function InvoiceForm({ theme, initialData, context }) {
                 {renderFormInput('partyAddress')}
               </div>
             </div>
+            
+            {/* --- NEW: CONTAINER TYPE SECTION --- */}
+            <div className={sectionContainerClasses}>
+                <h3 className={`text-lg font-semibold mb-3 ${headerTextClasses}`}>Container/Load Details</h3>
+                
+                <div className="grid grid-cols-3 gap-3">
+                    {/* 1. Load Direction Dropdown */}
+                    <div className="col-span-1">
+                        <label className={`block text-sm font-medium mb-1 ${labelClasses}`}>Direction</label>
+                        <select
+                            name="loadDirection"
+                            value={formData.loadDirection}
+                            onChange={handleFormChange}
+                            className={inputClasses}
+                        >
+                            <option value="Import">Import</option>
+                            <option value="Export">Export</option>
+                        </select>
+                    </div>
+
+                    {/* 2. Vehicle Count Number Input */}
+                    <div className="col-span-1">
+                        <label className={`block text-sm font-medium mb-1 ${labelClasses}`}>Vehicle Count</label>
+                        <input
+                            type="number"
+                            name="vehicleCount"
+                            min="1"
+                            value={formData.vehicleCount}
+                            onChange={handleFormChange}
+                            className={inputClasses}
+                            placeholder="1"
+                        />
+                    </div>
+
+                    {/* 3. Container Size/Type Text Input */}
+                    <div className="col-span-1">
+                        <label className={`block text-sm font-medium mb-1 ${labelClasses}`}>Size/Type (e.g. 40)</label>
+                        <input
+                            type="text"
+                            name="containerSize"
+                            value={formData.containerSize}
+                            onChange={handleFormChange}
+                            onFocus={() => handleInputFocus('containerSize', null, formData.containerSize)}
+                            onBlur={handleInputBlur}
+                            className={inputClasses}
+                            placeholder="40"
+                        />
+                        <SuggestionDropdown 
+                            fieldName='containerSize'
+                            value={formData.containerSize}
+                            onSelect={handleSuggestionClick}
+                        />
+                    </div>
+                </div>
+                
+                <p className={`text-sm mt-3 ${labelClasses}`}>
+                    Total vehicles entries below: {currentVehicleCount} ({formData.loadDirection} {currentVehicleCount}x{formData.containerSize})
+                </p>
+            </div>
+            {/* --- END CONTAINER TYPE SECTION --- */}
+
 
             {/* Vehicle Details Section */}
             <div className="mb-5">
               <div className="flex justify-between items-center mb-4">
                 <h3 className={`text-xl font-bold ${subHeaderTextClasses}`}>Vehicle Entries ({vehicles.length})</h3>
+                {/* NOTE: We keep manual buttons for adding/removing vehicles, which also updates the count */}
                 <button
                   type="button"
                   onClick={addVehicle}
