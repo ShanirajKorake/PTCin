@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { Lock, XCircle, CheckCircle, Loader2 } from "lucide-react";
 import Divers from './Pages/Drivers';
 import NewInvoice from './Pages/NewInvoice';
 import Header from "./components/Header";
@@ -6,20 +7,25 @@ import Footer from "./components/Footer";
 import Dashboard from "./Pages/Dashboard";
 import History from "./Pages/History";
 import './index.css';
-
-// 1. IMPORT CAPACITOR STATUS BAR PLUGIN
-import { StatusBar } from '@capacitor/status-bar';
+import { StatusBar, Style } from "@capacitor/status-bar";
+// Define the target PIN globally or within the component scope
+const TARGET_PIN = '7655';
 
 // Main App Component
 function App() {
-  const [theme, setTheme] = useState("light");
+  const [theme, setTheme] = useState("dark");
   const [currentPage, setPage] = useState("dashboard");
+  
+  // 1. PIN VERIFICATION STATE
+  const [isAuthenticated, setIsAuthenticated] = useState(
+    sessionStorage.getItem('authenticated') === 'true'
+  );
   
   // NEW STATE: Manages data and title for InvoiceForm when editing/duplicating
   const [formContext, setFormContext] = useState({ 
-    mode: 'new', // 'new', 'edit', or 'duplicate'
+    mode: 'null', 
     data: null, 
-    title: 'Create New Invoice' 
+    title: 'Dashboard' 
   });
 
   const toggleTheme = (newTheme) => {
@@ -32,20 +38,23 @@ function App() {
   useEffect(() => {
     // Set the body background color based on theme
     document.body.className = theme === "dark" ? "bg-gray-900" : "bg-gray-100";
-
-    // Logic to change the native status bar color/style
-    if (theme === "dark") {
-        StatusBar.setStyle({ style: 'light' }); // Status bar icons (text/icons) should be light on a dark background
-    } else {
-        StatusBar.setStyle({ style: 'dark' }); // Status bar icons should be dark on a light background
+    
+    // Status Bar Logic (uncomment if running in Capacitor environment)
+    
+    if (window.statusbar) {
+        if (theme === "dark") {
+            StatusBar.setStyle({ style: Style.Dark });
+        } else {
+            StatusBar.setStyle({ style: Style.Light });
+        }
     }
-
-  }, [theme]); // Reruns whenever the theme state changes
+    
+  }, [theme]); 
 
   // NEW HANDLER: Passed to History.jsx to request navigation/data load
   const handleNavigateToForm = (data, mode, title) => {
-      setFormContext({ mode, data, title }); // Set the data and context
-      setPage('new Invoice');               // Navigate to the form page
+      setFormContext({ mode, data, title }); 
+      setPage('new Invoice');               
   };
 
   // Conditional rendering function for routing
@@ -55,16 +64,13 @@ function App() {
         return <Dashboard theme={theme}/>;
       
       case "new Invoice":
-        // Pass the editing/duplication context to the NewInvoice component
         return <NewInvoice 
                   theme={theme} 
                   initialData={formContext.data} 
                   contextTitle={formContext.title}
-                  // Optionally, pass setPage back if NewInvoice needs to navigate back
                />;
       
       case "history":
-        // Pass the navigation handler to History.jsx
         return <History 
                   theme={theme} 
                   onNavigateToForm={handleNavigateToForm} 
@@ -77,6 +83,129 @@ function App() {
         return <Dashboard theme={theme}/>;
     }
   };
+  
+  // 3. PIN VERIFICATION SCREEN COMPONENT
+  const PinVerificationScreen = () => {
+    const [pinInput, setPinInput] = useState('');
+    const [error, setError] = useState(false);
+    const [isChecking, setIsChecking] = useState(false);
+    
+    // Keypad layout
+    const keypad = [
+        '1', '2', '3', 
+        '4', '5', '6', 
+        '7', '8', '9', 
+        'C', '0', 'OK' 
+    ];
+
+    // Dynamic styling based on App's theme state
+    const isDark = theme === 'dark';
+    const cardBg = isDark ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200';
+    const textColor = isDark ? 'text-white' : 'text-gray-900';
+    const buttonBaseClass = "p-4 text-2xl font-bold rounded-xl shadow-md transition-all duration-150 active:scale-95 w-full h-16 flex items-center justify-center";
+
+    const handleSubmit = (e) => {
+        if (e) e.preventDefault();
+        if (pinInput.length !== 4) return;
+        
+        setIsChecking(true);
+        
+        setTimeout(() => {
+            if (pinInput === TARGET_PIN) {
+                sessionStorage.setItem('authenticated', 'true');
+                setIsAuthenticated(true);
+            } else {
+                setError(true);
+                setPinInput('');
+            }
+            setIsChecking(false);
+        }, 400); // Simulate check delay
+    };
+    
+    // Handler for virtual keyboard input
+    const handleKeyClick = (key) => {
+        if (isChecking) return;
+
+        if (key === 'C') {
+            setPinInput('');
+            setError(false);
+        } else if (key === 'OK') {
+            handleSubmit();
+        } else if (pinInput.length < 4) {
+            setPinInput(prev => prev + key);
+            if (error) setError(false);
+        }
+    };
+
+    return (
+        <div className={`flex items-center justify-center h-screen w-full ${isDark ? 'bg-gray-900' : 'bg-gray-100'}`}>
+            <div className={`p-6 rounded-3xl shadow-2xl max-w-sm w-full border ${cardBg}`}>
+                
+                <Lock size={40} className={`mx-auto mb-4 ${isDark ? 'text-indigo-400' : 'text-indigo-600'}`} />
+                <h2 className={`text-2xl font-bold mb-8 text-center ${textColor}`}>
+                    Secure Access
+                </h2>
+
+                {/* PIN Display */}
+                <div className={`flex justify-center space-x-3 mb-6`}>
+                    {Array(4).fill(null).map((_, index) => (
+                        <div key={index} className={`w-10 h-10 border-b-4 
+                            ${error ? 'border-red-500' : 'border-indigo-500'} 
+                            ${pinInput[index] ? 'opacity-100' : 'opacity-40'}
+                            flex items-center justify-center ${textColor}`}>
+                            {pinInput[index] ? <span className="text-3xl font-mono">•</span> : null}
+                        </div>
+                    ))}
+                </div>
+                
+                {/* Status Message */}
+                {error && (
+                    <p className="text-red-500 text-sm mb-4 text-center flex items-center justify-center">
+                        <XCircle size={16} className="mr-1" /> Invalid PIN.
+                    </p>
+                )}
+                
+                {/* Virtual Keypad */}
+                <div className="grid grid-cols-3 gap-3">
+                    {keypad.map((key) => {
+                        let buttonClasses = isDark 
+                            ? 'bg-gray-700 hover:bg-gray-600 text-white' 
+                            : 'bg-gray-200 hover:bg-gray-300 text-gray-900';
+
+                        if (key === 'C') {
+                            buttonClasses = isDark ? 'bg-red-700/50 hover:bg-red-600/70 text-red-100' : 'bg-red-200 hover:bg-red-300 text-red-700';
+                        } else if (key === 'OK') {
+                             buttonClasses = (pinInput.length === 4 && !isChecking)
+                                ? 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                                : 'bg-gray-400 text-gray-700 cursor-not-allowed';
+                        }
+                        
+                        return (
+                            <button
+                                key={key}
+                                type="button"
+                                disabled={isChecking || (key === 'OK' && pinInput.length !== 4)}
+                                onClick={() => handleKeyClick(key)}
+                                className={`${buttonBaseClass} ${buttonClasses} ${key === 'OK' && 'col-span-1'}`}
+                            >
+                                {isChecking && key === 'OK' ? (
+                                    <Loader2 size={20} className="animate-spin" />
+                                ) : (
+                                    key
+                                )}
+                            </button>
+                        );
+                    })}
+                </div>
+            </div>
+        </div>
+    );
+  };
+  
+  // --- CONDITIONAL RENDERING ---
+  if (!isAuthenticated) {
+    return <PinVerificationScreen />;
+  }
 
   const themeClasses = theme === 'dark'
     ? 'bg-gray-900 text-white'
@@ -89,7 +218,7 @@ function App() {
         <Header 
           toggleTheme={toggleTheme} 
           theme={theme} 
-          title={formContext.title} // Display the custom title when in the form
+          title={formContext.title} 
         />
 
         {/* Main Content Area: Scrollable middle section */}
@@ -98,7 +227,12 @@ function App() {
         </main>
 
         {/* Footer Navigation - handles page switching */}
-        <Footer currentPage={currentPage} setPage={setPage} theme={theme} setFormContextChanger={setFormContext}/>
+        <Footer 
+          currentPage={currentPage} 
+          setPage={setPage} 
+          theme={theme} 
+          setFormContextChanger={setFormContext}
+        />
     </div>
   );
 }

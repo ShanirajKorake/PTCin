@@ -1,34 +1,60 @@
-import React, { useState, useEffect } from 'react';
-import { ChevronDown, ChevronUp, Trash2, CheckCircle, Edit, Copy } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { ChevronDown, ChevronUp, Trash2, CheckCircle, Edit, Copy, Loader2, RefreshCw } from 'lucide-react';
 import { getInvoicesHistory, deleteInvoice, clearInvoiceDue } from '../services/dbService';
 import InvoicePDF from '../components/InvoicePDF';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 
-// NOTE: This component now requires a single navigation function from the parent.
+// --- Utility Function: Date Format ---
+/**
+ * Converts a YYYY-MM-DD date string (or Date object) to DD-MM-YYYY string.
+ * @param {string|Date} dateString - The date string in YYYY-MM-DD format.
+ * @returns {string} The date string in DD-MM-YYYY format, or a locale date string if parse fails.
+ */
+const formatDateForDisplay = (dateString) => {
+    if (!dateString) return '';
+    try {
+        const parts = dateString.split('T')[0].split('-');
+        if (parts.length === 3) {
+            // Re-order: DD-MM-YYYY
+            return `${parts[2]}-${parts[1]}-${parts[0]}`;
+        }
+    } catch (e) {
+        return new Date(dateString).toLocaleDateString('en-IN');
+    }
+    return new Date(dateString).toLocaleDateString('en-IN');
+};
+
+
 export default function History({ theme, onNavigateToForm }) {
     const [invoices, setInvoices] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState(null); // NEW: State for errors
     const [expandedId, setExpandedId] = useState(null);
     const [previewData, setPreviewData] = useState(null);
+    const [isDeleting, setIsDeleting] = useState(false); // For local loading state
 
-    // --- Data Fetching and General Handlers (omitted for brevity, assume they are correct) ---
-    const loadHistory = async () => {
+    // --- Data Fetching Logic (Updated with Error Handling) ---
+    const loadHistory = useCallback(async () => {
         setIsLoading(true);
+        setError(null);
         try {
             const fetchedInvoices = await getInvoicesHistory();
             const sortedInvoices = fetchedInvoices.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
             setInvoices(sortedInvoices);
         } catch (e) {
             console.error("Failed to load history:", e);
+            setError("Failed to fetch invoice history. Please check your network and Appwrite setup.");
+            setInvoices([]);
         } finally {
             setIsLoading(false);
         }
-    };
+    }, []);
 
     // --- Delete Handler ---
     const handleDelete = async (id, partyName) => {
         if (window.confirm(`Are you sure you want to permanently delete the invoice for "${partyName}"? This cannot be undone.`)) {
+            setIsDeleting(true);
             try {
                 await deleteInvoice(id);
                 setExpandedId(null);
@@ -37,20 +63,25 @@ export default function History({ theme, onNavigateToForm }) {
             } catch (error) {
                 alert("Could not delete invoice. Please try again.");
                 console.error("Deletion error:", error);
+            } finally {
+                setIsDeleting(false);
             }
         }
     };
 
-    // --- Clear Due Handler (NEW) ---
+    // --- Clear Due Handler ---
     const handleClearDue = async (id, partyName) => {
         if (window.confirm(`Confirm payment received for ${partyName}? This will set the balance due to zero.`)) {
+            setIsDeleting(true); // Using this state for any update operation
             try {
                 await clearInvoiceDue(id);
-                setExpandedId(null); // Collapse view after action
-                await loadHistory(); // Refresh the list
+                setExpandedId(null); 
+                await loadHistory(); 
             } catch (error) {
                 alert("Could not update payment status. Please try again.");
                 console.error("Clear Due error:", error);
+            } finally {
+                setIsDeleting(false);
             }
         }
     };
@@ -63,12 +94,11 @@ export default function History({ theme, onNavigateToForm }) {
         setExpandedId(prevId => (prevId === id ? null : id));
     };
 
-    // --- Generate PDF Data for Preview ---
+    // --- Generate PDF Data for Preview (Unchanged) ---
     const handleGeneratePDF = (invoice) => {
         setPreviewData({
             formData: invoice.formData,
             vehicles: invoice.vehicles,
-            // Mock URL/Filename needed for preview component
             url: "data:application/pdf;base64,Base64_PDF_Content",
             filename: `Invoice_${invoice.formData.invoiceNo}_${new Date().getFullYear()}.pdf`
         });
@@ -78,7 +108,7 @@ export default function History({ theme, onNavigateToForm }) {
         setPreviewData(null);
     };
 
-    // --- CAPACITOR SHARE LOGIC (Unchanged from last correct version) ---
+    // --- CAPACITOR SHARE LOGIC (Unchanged) ---
     const handleShare = async () => {
         if (!previewData || !previewData.url) return;
         const { url, filename } = previewData;
@@ -106,28 +136,22 @@ export default function History({ theme, onNavigateToForm }) {
     // --- Initial Load Effect ---
     useEffect(() => {
         loadHistory();
-    }, []);
+    }, [loadHistory]);
 
-    // --- NEW: Data Preparation Functions ---
-
+    // --- Data Preparation Functions (Unchanged) ---
     const prepareDataForEdit = (invoice) => {
-        // For editing, keep EVERYTHING (ID, InvoiceNo, Dates) the same.
         const title = `Editing Invoice ${invoice.formData.invoiceNo}`;
         onNavigateToForm(invoice, 'edit', title);
     };
 
     const prepareDataForDuplicate = (invoice) => {
-        // For duplicating, copy details but reset system-generated fields:
         const duplicatedData = {
             ...invoice,
             formData: {
                 ...invoice.formData,
-                // The new invoice form must generate a new P000XX number
                 invoiceNo: "Loading...",
-                // Set bill date to today
                 billDate: new Date().toISOString().split("T")[0]
             },
-            // Reset system ID (timestamp) to ensure it saves as a new unique entry
             id: null,
         };
         const title = `Duplicating Invoice ${invoice.formData.invoiceNo}`;
@@ -135,7 +159,7 @@ export default function History({ theme, onNavigateToForm }) {
     };
 
 
-    // --- Dynamic Theme Classes (Omitted for brevity) ---
+    // --- Dynamic Theme Classes ---
     const isLight = theme === "light";
     const titleClasses = isLight ? "text-indigo-600" : "text-indigo-400";
     const cardClasses = isLight ? "bg-white shadow-lg border border-gray-200" : "bg-gray-800 shadow-xl border border-gray-700";
@@ -143,18 +167,53 @@ export default function History({ theme, onNavigateToForm }) {
     const summaryHeaderClasses = isLight ? "bg-indigo-100 text-indigo-800" : "bg-indigo-900/40 text-indigo-300";
     const containerClasses = isLight ? "bg-gray-50 text-gray-800" : "bg-gray-900 text-white";
     const textClasses = isLight ? "text-gray-500" : "text-gray-300";
-    // ... (rest of theme classes)
+    const retryButtonClasses = "bg-red-600 text-white px-4 py-2 rounded-xl flex items-center justify-center hover:bg-red-700 transition";
 
-    if (isLoading) {
-        return (
-            <div className={`p-4 pt-20 text-center ${containerClasses}`}>
-                <p className={`${textClasses} animate-pulse`}>Loading invoice history...</p>
-            </div>
-        );
-    }
 
-    // --- Display PDF Preview if data is set (Unchanged) ---
+    // --- Render Logic for Loading/Error/Empty States ---
+    const renderStatus = () => {
+        if (isLoading) {
+            return (
+                <div className={`p-4 py-12 text-center ${cardClasses} max-w-lg mx-auto`}>
+                    <Loader2 size={30} className={`mx-auto mb-3 animate-spin ${titleClasses}`} />
+                    <p className={`font-medium ${textClasses}`}>Loading invoice history...</p>
+                </div>
+            );
+        }
+
+        if (error) {
+            return (
+                <div className={`p-4 py-8 text-center ${cardClasses} max-w-lg mx-auto`}>
+                    <span role="img" aria-label="Error" className="text-4xl block mb-3">
+                        ❌
+                    </span>
+                    <p className={`font-medium text-red-500 mb-3`}>Error loading data.</p>
+                    <button onClick={loadHistory} className={retryButtonClasses}>
+                        <RefreshCw size={16} className="mr-2" />
+                        Retry Loading
+                    </button>
+                </div>
+            );
+        }
+        
+        if (invoices.length === 0) {
+            return (
+                <div className={`p-4 py-12 text-center ${cardClasses} max-w-lg mx-auto`}>
+                    <span role="img" aria-label="Empty" className="text-4xl block mb-3">
+                        📭
+                    </span>
+                    <p className={`font-medium ${textClasses}`}>No records found. Start by creating a new invoice!</p>
+                </div>
+            );
+        }
+        
+        return null;
+    };
+
+
+    // --- Main Component JSX Return ---
     if (previewData) {
+        // PDF Preview Mode
         return (
             <div className={`p-4 pt-20 pb-20 w-full ${containerClasses}`}>
                 <div className="flex justify-between items-center mb-4 max-w-lg mx-auto">
@@ -168,7 +227,6 @@ export default function History({ theme, onNavigateToForm }) {
                         </svg> Back
                     </button>
                 </div>
-                {/* NOTE: handleDownload is omitted here as it wasn't defined in the prompt's History.jsx */}
                 <InvoicePDF
                     formData={previewData.formData}
                     vehicles={previewData.vehicles}
@@ -180,19 +238,19 @@ export default function History({ theme, onNavigateToForm }) {
             </div>
         );
     }
-
-
-
+    
+    // History List Mode
     return (
-        <div className={`p-4 pt-20 pb-20 w-full ${containerClasses}`}>
+        <div className={`p-4 pt-20 pb-22 w-full ${containerClasses} h-full`}>
             <h2 className={`text-4xl font-extrabold mb-8 text-center ${titleClasses}`}>
                 Invoice History
             </h2>
 
             <div className="space-y-4 max-w-lg mx-auto">
-                {/* ... (invoices.length === 0 block) ... */}
-                {invoices.map((invoice) => {
-                    // ... (invoice setup and theme logic) ...
+                {renderStatus()}
+                
+                {/* Render Invoices only if they exist and no error */}
+                {!isLoading && !error && invoices.map((invoice) => {
                     const isExpanded = invoice.id === expandedId;
                     const summary = invoice.summary;
                     const formData = invoice.formData;
@@ -200,11 +258,12 @@ export default function History({ theme, onNavigateToForm }) {
                     const balanceDue = parseFloat(summary.totalBalance || 0);
                     const isDue = balanceDue > 0.01;
                     const totalBalanceFormatted = balanceDue.toLocaleString('en-IN', { minimumFractionDigits: 2 });
-                    const dateFormatted = new Date(formData.billDate).toLocaleDateString('en-IN');
+                    const dateFormatted = formatDateForDisplay(formData.billDate); 
 
                     return (
-                        <div key={invoice.id} className={`rounded-xl shadow-md transition-all duration-300 ${cardClasses} overflow-hidden`}>
-                            {/* ... (Initial Entry Button) ... */}
+                        <div key={invoice.id} className={`rounded-xl shadow-md transition-all duration-300 ${cardClasses} overflow-hidden ${isDeleting && isExpanded ? 'opacity-50' : ''}`}>
+                            
+                            {/* Header Button */}
                             <button
                                 onClick={() => toggleExpand(invoice.id)}
                                 className="w-full p-4 flex justify-between items-center text-left"
@@ -223,8 +282,7 @@ export default function History({ theme, onNavigateToForm }) {
                             {isExpanded && (
                                 <div className={`p-4 border-t ${isLight ? 'border-gray-300' : 'border-gray-600'} space-y-4`}>
 
-                                    {/* ... (Trip Details, Vehicle List, Financial Summary sections) ... */}
-                                    {/* 1. Trip Details (Unchanged) */}
+                                    {/* 1. Trip Details (DD-MM-YYYY format applied) */}
                                     <h4 className={`font-bold mt-2 ${titleClasses}`}>Trip Details</h4>
                                     <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
                                         <p className={`font-semibold ${subTextClasses}`}>Address:</p>
@@ -232,10 +290,12 @@ export default function History({ theme, onNavigateToForm }) {
                                         <p className={`font-semibold ${subTextClasses}`}>Trip:</p>
                                         <p className={`${subTextClasses}`}>{formData.from} to {formData.to} to {formData.backTo}</p>
                                         <p className={`font-semibold ${subTextClasses}`}>Dates:</p>
-                                        <p className={`${subTextClasses}`}>{new Date(formData.loadingDate).toLocaleDateString()} to {new Date(formData.unloadingDate).toLocaleDateString()}</p>
+                                        <p className={`${subTextClasses}`}>
+                                            {formatDateForDisplay(formData.loadingDate)} to {formatDateForDisplay(formData.unloadingDate)}
+                                        </p>
                                     </div>
 
-                                    {/* 2. Vehicles List with Detailed Charges (Unchanged) */}
+                                    {/* 2. Vehicles List with Detailed Charges (Updated 'commission' to 'warai') */}
                                     <h4 className={`font-bold pt-4 ${titleClasses}`}>Vehicles ({vehicles.length})</h4>
                                     <div className="space-y-3">
                                         {vehicles.map((v, index) => (
@@ -244,9 +304,9 @@ export default function History({ theme, onNavigateToForm }) {
 
                                                 {/* CHARGES BREAKDOWN */}
                                                 <div className="grid grid-cols-2 gap-1">
-                                                    {['freight', 'unloadingCharges', 'detention', 'weightCharges', 'others', 'commission', 'advance'].map(field => (
+                                                    {['freight', 'unloadingCharges', 'detention', 'weightCharges', 'others', 'warai', 'advance'].map(field => ( 
                                                         <div key={field} className="flex justify-between col-span-1">
-                                                            <p className="font-medium capitalize text-gray-500/70">{field.replace(/([A-Z])/g, ' $1').trim()}:</p>
+                                                            <p className="font-medium capitalize text-gray-500/70">{field.replace(/([A-Z])/g, ' $1').replace('warai', 'Warai').trim()}:</p>
                                                             <p className="font-semibold">{parseFloat(v[field]).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
                                                         </div>
                                                     ))}
@@ -268,23 +328,21 @@ export default function History({ theme, onNavigateToForm }) {
                                             <p className="font-bold text-right">₹{parseFloat(summary.totalFreight).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
                                             <p>Total Advance:</p>
                                             <p className="font-bold text-right">₹{parseFloat(summary.totalAdvance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                                            <p className="font-extrabold text-lg ${isDue ? 'text-red-400' : 'text-green-500'}">Balance Due:</p>
-                                            <p className="font-extrabold text-lg text-right ${isDue ? 'text-red-400' : 'text-green-500'}">₹{totalBalanceFormatted}</p>
+                                            <p className={`font-extrabold text-lg ${isDue ? 'text-red-400' : 'text-green-500'}`}>Balance Due:</p>
+                                            <p className={`font-extrabold text-lg text-right ${isDue ? 'text-red-400' : 'text-green-500'}`}>₹{totalBalanceFormatted}</p>
                                         </div>
                                     </div>
 
-
-
                                     {/* --- PRIMARY ACTION BUTTONS: Clear Due / Generate PDF --- */}
                                     <div className="flex justify-between pt-4 space-x-4">
-                                        {/* Conditional Clear Due Button / PAID Status (Omitted for brevity) */}
                                         {isDue ? (
                                             <button
                                                 onClick={() => handleClearDue(invoice.id, formData.partyName)}
-                                                className={`flex-1 flex items-center justify-center bg-green-600 text-white px-6 py-3 rounded-2xl shadow-xl hover:bg-green-700 transition-all duration-300 text-lg font-semibold tracking-wide`}
+                                                disabled={isDeleting}
+                                                className={`flex-1 flex items-center justify-center bg-green-600 text-white px-6 py-3 rounded-2xl shadow-xl hover:bg-green-700 transition-all duration-300 text-lg font-semibold tracking-wide ${isDeleting ? 'opacity-70 cursor-not-allowed' : ''}`}
                                             >
-                                                <CheckCircle size={20} className="mr-2" />
-                                                Clear Due
+                                                {isDeleting ? <Loader2 size={20} className="animate-spin mr-2" /> : <CheckCircle size={20} className="mr-2" />}
+                                                {isDeleting ? 'Updating...' : 'Clear Due'}
                                             </button>
                                         ) : (
                                             <div className="flex-1 text-center py-3">
@@ -304,28 +362,28 @@ export default function History({ theme, onNavigateToForm }) {
                                     {/* --- SECONDARY ACTION BUTTONS: Edit, Duplicate, Delete --- */}
                                     <div className={`flex justify-between pt-2 space-x-2 border-t ${isLight ? 'border-gray-200' : 'border-gray-700'}`}>
 
-                                        {/* EDIT Button */}
                                         <button
-                                            onClick={() => prepareDataForEdit(invoice)} // Call new prep function
-                                            className={`flex-1 flex items-center justify-center bg-yellow-600 text-white px-3 py-2 rounded-xl shadow-md hover:bg-yellow-700 transition text-sm font-medium`}
+                                            onClick={() => prepareDataForEdit(invoice)}
+                                            disabled={isDeleting}
+                                            className={`flex-1 flex items-center justify-center bg-yellow-600 text-white px-3 py-2 rounded-xl shadow-md transition text-sm font-medium ${isDeleting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-yellow-700'}`}
                                         >
                                             <Edit size={16} className="mr-1" />
                                             Edit
                                         </button>
 
-                                        {/* DUPLICATE Button */}
                                         <button
-                                            onClick={() => prepareDataForDuplicate(invoice)} // Call new prep function
-                                            className={`flex-1 flex items-center justify-center bg-blue-600 text-white px-3 py-2 rounded-xl shadow-md hover:bg-blue-700 transition text-sm font-medium`}
+                                            onClick={() => prepareDataForDuplicate(invoice)}
+                                            disabled={isDeleting}
+                                            className={`flex-1 flex items-center justify-center bg-blue-600 text-white px-3 py-2 rounded-xl shadow-md transition text-sm font-medium ${isDeleting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-blue-700'}`}
                                         >
                                             <Copy size={16} className="mr-1" />
                                             Duplicate
                                         </button>
 
-                                        {/* DELETE Button */}
                                         <button
                                             onClick={() => handleDelete(invoice.id, formData.partyName)}
-                                            className={`flex-1 flex items-center justify-center bg-red-600 text-white px-3 py-2 rounded-xl shadow-md hover:bg-red-700 transition text-sm font-medium`}
+                                            disabled={isDeleting}
+                                            className={`flex-1 flex items-center justify-center bg-red-600 text-white px-3 py-2 rounded-xl shadow-md transition text-sm font-medium ${isDeleting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-red-700'}`}
                                         >
                                             <Trash2 size={16} className="mr-1" />
                                             Delete

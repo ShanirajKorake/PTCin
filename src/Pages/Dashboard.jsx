@@ -1,53 +1,286 @@
-import React from 'react'
-import logo from '../assets/logo.jpg'; // Assuming your logo is accessible here
+import React, { useState, useEffect, useCallback } from 'react';
+import { motion } from 'framer-motion';
+import { Loader2, RefreshCw, Truck, BadgeIndianRupee, Users, Calendar, TrendingUp, ChevronsDown } from 'lucide-react';
+import { getInvoicesHistory } from '../services/dbService';
+import logo from '../assets/logo.jpg';
 
-// Accept the 'theme' prop
-export default function Dashboard({ theme }) {
+// --- CONFIG ---
+const DAYS_FOR_STATS = 30;
+const TOP_N_PARTIES = 5;
 
-    // 1. Conditional Styling for the Main Dashboard Container
-    const dashboardClasses = theme === "light"
-        ? "bg-gray-50 text-gray-800" // Light theme background and default text
-        : "bg-gray-900 text-white"; // Dark theme background and default text
+// --- STATS CALCULATION FUNCTION (unchanged for brevity) ---
+const calculateStats = (history) => {
+    if (!history || history.length === 0) {
+        return {
+            totalRevenue: 0,
+            last30DaysRevenue: 0,
+            last30DaysTrips: 0,
+            topDueParties: [],
+            totalDueAmount: 0,
+            recentTrips: [],
+            topTripsParties: [],
+            totalTrips: 0,
+        };
+    }
 
-    // 2. Conditional Styling for the Title
-    const titleClasses = theme === "light"
-        ? "text-indigo-600" // Light theme title color
-        : "text-indigo-400"; // Dark theme title color
+    const today = new Date();
+    const thirtyDaysAgo = new Date(today.getTime());
+    thirtyDaysAgo.setDate(today.getDate() - DAYS_FOR_STATS);
+    
+    let last30DaysRevenue = 0;
+    let last30DaysTrips = 0;
+    let totalRevenue = 0;
+    let totalDueAmount = 0;
+    const duePartiesMap = new Map();
+    const partyTripCountMap = new Map();
+    const recentTrips = [];
+    let totalTrips = history.length;
 
-    // 3. Conditional Styling for the Text
-    const textClasses = theme === "light"
-        ? "text-gray-500" // Light theme secondary text
-        : "text-gray-300"; // Dark theme secondary text
+    history.forEach(invoice => {
+        const billDate = new Date(invoice.formData.billDate);
+        const invoiceTotalFreight = parseFloat(invoice.summary.totalFreight || 0);
+        const invoiceBalance = parseFloat(invoice.summary.totalBalance || 0);
+        totalRevenue += invoiceTotalFreight;
 
+        if (billDate >= thirtyDaysAgo) {
+            last30DaysRevenue += invoiceTotalFreight;
+            last30DaysTrips += 1;
+        }
+
+        if (invoiceBalance > 0.01) {
+            totalDueAmount += invoiceBalance;
+            const partyName = invoice.formData.partyName;
+            const currentDue = duePartiesMap.get(partyName) || 0;
+            duePartiesMap.set(partyName, currentDue + invoiceBalance);
+        }
+
+        recentTrips.push({
+            date: billDate,
+            party: invoice.formData.partyName,
+            balance: invoiceBalance,
+            invoiceNo: invoice.formData.invoiceNo,
+            from: invoice.formData.from,
+            to: invoice.formData.to,
+        });
+
+        const currentCount = partyTripCountMap.get(invoice.formData.partyName) || 0;
+        partyTripCountMap.set(invoice.formData.partyName, currentCount + 1);
+    });
+
+    const topDueParties = Array.from(duePartiesMap.entries())
+        .map(([party, totalDue]) => ({ party, totalDue }))
+        .sort((a, b) => b.totalDue - a.totalDue)
+        .slice(0, TOP_N_PARTIES)
+        .filter(p => p.totalDue > 0);
+
+    const topTripsParties = Array.from(partyTripCountMap.entries())
+        .map(([party, trips]) => ({ party, trips }))
+        .sort((a, b) => b.trips - a.trips)
+        .slice(0, TOP_N_PARTIES);
+
+    recentTrips.sort((a, b) => b.date - a.date);
+
+    return {
+        totalRevenue,
+        last30DaysRevenue,
+        last30DaysTrips,
+        topDueParties,
+        totalDueAmount,
+        recentTrips: recentTrips.slice(0, 5),
+        topTripsParties,
+        totalTrips,
+    };
+};
+
+// --- STAT CARD ---
+const StatCard = ({ icon: Icon, title, value, isCurrency, color, theme }) => {
+    const formattedValue = isCurrency
+        ? `₹${value.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`
+        : value.toLocaleString('en-IN');
+
+    const isLight = theme === 'light';
+    const bg = isLight ? 'bg-white' : 'bg-gray-800';
+    const text = isLight ? 'text-gray-900' : 'text-white';
 
     return (
-        // Apply the dynamic classes along with fixed layout classes
-        <div className={`p-4 text-center flex flex-col items-center justify-start w-full h-full ${dashboardClasses}`}>
+        <motion.div
+            whileHover={{ scale: 1.03 }}
+            whileTap={{ scale: 0.98 }}
+            className={`p-5 rounded-2xl ${bg} shadow-md transition-all border border-transparent hover:border-${color}-400/50 hover:shadow-${color}-400/30 flex flex-col justify-between`}
+        >
+            <div className="flex items-center mb-2 text-gray-500">
+                <Icon className={`mr-2 text-${color}-500`} />
+                <h4 className="text-sm font-semibold">{title}</h4>
+            </div>
+            <p className={`text-4xl font-extrabold ${text}`}>{formattedValue}</p>
+        </motion.div>
+    );
+};
 
-            {/* --- Big Logo at Top --- */}
-            <img 
-                src={logo} 
-                alt="Company Logo" 
-                className={`w-32 h-32 rounded-full my-20 shadow-xl ${theme === "light" ? "border-4 border-indigo-200" : "border-4 border-indigo-500"}`} 
-            />
+// --- MAIN COMPONENT ---
+export default function Dashboard({ theme }) {
+    const [stats, setStats] = useState(null);
+    const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState(null);
 
+    const isLight = theme === 'light';
+    const bg = isLight ? 'bg-gray-50 text-gray-800' : 'bg-gray-900 text-gray-100';
+    const cardBg = isLight ? 'bg-white' : 'bg-gray-800';
+    const accent = isLight ? 'text-indigo-600' : 'text-indigo-400';
 
-            {/* --- Removed all stats. Added message and sticker --- */}
-            <div className={`p-8 rounded-2xl max-w-md w-full ${theme === "light" ? "bg-white border border-gray-200" : "bg-gray-800 border border-gray-700"}`}>
-                
-                <span role="img" aria-label="Sticker" className="text-6xl block mb-4 animate-bounce">
-                    🚧
-                </span>
-                
-                <h3 className={`text-2xl font-semibold mb-2 ${titleClasses}`}>
-                    Coming Soon!
-                </h3>
-                
-                <p className={`text-lg font-medium ${textClasses}`}>
-                    More features and insights will be added here soon. Stay tuned!
-                </p>
+    const fetchAndCalculate = useCallback(async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
+            const history = await getInvoicesHistory();
+            setStats(calculateStats(history));
+        } catch (err) {
+            console.error(err);
+            setError('Failed to load dashboard data. Please try again.');
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
 
+    useEffect(() => {
+        fetchAndCalculate();
+    }, [fetchAndCalculate]);
+
+    // --- LOADING & ERROR STATES ---
+    if (isLoading || error || !stats) {
+        return (
+            <div className={`min-h-screen flex flex-col items-center justify-center ${bg}`}>
+                {isLoading ? (
+                    <>
+                        <Loader2 className={`animate-spin mb-4 ${accent}`} size={48} />
+                        <h2 className="text-2xl font-semibold">Loading insights...</h2>
+                        <p className="text-gray-500 mt-2">Fetching recent invoice history</p>
+                    </>
+                ) : (
+                    <div className={`text-center p-6 rounded-2xl shadow-lg ${cardBg}`}>
+                        <p className="text-5xl mb-4">🚨</p>
+                        <p className="text-xl font-semibold text-red-500 mb-2">Data Load Failed</p>
+                        <p className="text-gray-400 mb-4">{error}</p>
+                        <button
+                            onClick={fetchAndCalculate}
+                            className="bg-red-600 text-white px-4 py-2 rounded-xl flex items-center justify-center mx-auto hover:bg-red-700"
+                        >
+                            <RefreshCw className="mr-2" size={18} /> Retry
+                        </button>
+                    </div>
+                )}
+            </div>
+        );
+    }
+
+    return (
+        <div className={`min-h-screen p-6 ${bg}`}>
+            {/* HEADER */}
+            <div className="flex flex-col items-center my-10">
+                <motion.img
+                    src={logo}
+                    alt="Company Logo"
+                    className={`w-30 h-30 rounded-full shadow-xl border-3 ${isLight ? 'border-gray-300' : 'border-gray-500'}`}
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ duration: 0.6 }}
+                />
+            </div>
+
+            <div className="max-w-6xl mx-auto space-y-10">
+                {/* METRICS GRID */}
+                <div>
+                    <h3 className="text-2xl font-bold mb-4 flex items-center">
+                        <TrendingUp className={`mr-2 ${accent}`} /> Key Financial Metrics
+                    </h3>
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                        <StatCard icon={BadgeIndianRupee} title="Total Revenue" value={stats.totalRevenue} isCurrency color="green" theme={theme} />
+                        <StatCard icon={Calendar} title={`Last ${DAYS_FOR_STATS} Days Revenue`} value={stats.last30DaysRevenue} isCurrency color="indigo" theme={theme} />
+                        <StatCard icon={ChevronsDown} title="Total Balance Due" value={stats.totalDueAmount} isCurrency color="red" theme={theme} />
+                        <StatCard icon={Truck} title={`Trips in ${DAYS_FOR_STATS} Days`} value={stats.last30DaysTrips} color="purple" theme={theme} />
+                    </div>
+                </div>
+
+                {/* PARTY ANALYSIS */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* DUE PARTIES */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.4 }}
+                        viewport={{ once: true }}
+                        className={`p-5 rounded-xl ${cardBg} shadow-lg`}
+                    >
+                        <h3 className="text-xl font-bold mb-4 flex items-center">
+                            <ChevronsDown className="mr-2 text-red-500" /> Top Due Parties
+                        </h3>
+                        {stats.topDueParties.length ? (
+                            <ul className="divide-y divide-gray-200/20">
+                                {stats.topDueParties.map((p, i) => (
+                                    <li key={i} className="flex justify-between py-2">
+                                        <span>{i + 1}. {p.party}</span>
+                                        <span className="font-semibold text-red-400">
+                                            ₹{p.totalDue.toLocaleString('en-IN')}
+                                        </span>
+                                    </li>
+                                ))}
+                            </ul>
+                        ) : (
+                            <p className="text-gray-400">No dues found</p>
+                        )}
+                    </motion.div>
+
+                    {/* FREQUENT CLIENTS */}
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.4, delay: 0.1 }}
+                        viewport={{ once: true }}
+                        className={`p-5 rounded-xl ${cardBg} shadow-lg`}
+                    >
+                        <h3 className="text-xl font-bold mb-4 flex items-center">
+                            <Users className="mr-2 text-indigo-500" /> Frequent Clients
+                        </h3>
+                        <ul className="divide-y divide-gray-200/20">
+                            {stats.topTripsParties.map((p, i) => (
+                                <li key={i} className="flex justify-between py-2">
+                                    <span>{i + 1}. {p.party}</span>
+                                    <span className="text-indigo-400 font-semibold">{p.trips} Trips</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </motion.div>
+                </div>
+
+                {/* RECENT TRIPS */}
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.4, delay: 0.15 }}
+                    viewport={{ once: true }}
+                    className={`p-5 rounded-xl ${cardBg} shadow-lg`}
+                >
+                    <h3 className="text-xl font-bold mb-4 flex items-center">
+                        <Calendar className="mr-2 text-green-500" /> Recent Trips
+                    </h3>
+                    <ul className="divide-y divide-gray-200/20">
+                        {stats.recentTrips.map((trip, i) => (
+                            <li key={i} className="flex justify-between py-2 text-sm">
+                                <div>
+                                    <p className="font-medium">{trip.party} ({trip.invoiceNo})</p>
+                                    <p className="text-gray-400 text-xs">{trip.from} → {trip.to}</p>
+                                </div>
+                                <div className="text-right">
+                                    <p className={`font-semibold ${trip.balance > 0 ? 'text-red-400' : 'text-green-400'}`}>
+                                        {trip.balance > 0 ? `₹${trip.balance}` : 'PAID'}
+                                    </p>
+                                    <p className="text-gray-400 text-xs">{new Date(trip.date).toLocaleDateString()}</p>
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+                </motion.div>
             </div>
         </div>
-    )
+    );
 }

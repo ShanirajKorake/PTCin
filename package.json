@@ -21,6 +21,7 @@
     "@tailwindcss/vite": "^4.1.16",
     "appwrite": "^21.4.0",
     "firebase": "^12.5.0",
+    "framer-motion": "^12.23.24",
     "jspdf": "^3.0.3",
     "jspdf-autotable": "^5.0.2",
     "lucide-react": "^0.548.0",
