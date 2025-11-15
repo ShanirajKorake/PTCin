@@ -99,7 +99,7 @@ export default function InvoicePDF({ formData, vehicles, theme, handleDone}) {
         const MARGIN = 10;
         
         // 7 Logical Columns: [0:LR No. (15), 1:Vehicle/Container No. (30), 2:Charge Name (30), 3:Charge Amt (30), 4:Total Freight (30), 5:Total Advance (30), 6:Balance Due (25)]
-        const COL_WIDTHS = [15, 35, 25, 30, 30, 30, 25]; 
+        const COL_WIDTHS = [25, 40, 25, 25, 25, 25, 25]; 
 
         // --- Custom Colors ---
         const COLOR_WHITE = [255, 255, 255];
@@ -239,13 +239,13 @@ export default function InvoicePDF({ formData, vehicles, theme, handleDone}) {
         // Prepare content strings for the new LR and Vehicle/Container columns
         const lrContent = Array.from({ length: 5 }, (_, idx) => {
             const v = vehicles[idx];
-            return v ? `${v.lrNo || ''}` : '\n \n ';
+            return v ? `${v.lrNo || ''}` : ' ';
         }).join('\n\n');
 
         const vehicleContainerContent = Array.from({ length: 5 }, (_, idx) => {
             const v = vehicles[idx];
-            return v ? `${v.vehicleNo || ''}  ${v.containerNo || ''}` : '\n \n ';
-        }).join('\n\n');
+            return v ? `${v.vehicleNo || ''}\n${v.containerNo || ''}` : '\n';
+        }).join('\n');
 
 
         const N_ROWS_FOR_CHARGES = charges.length || 1;
@@ -261,7 +261,7 @@ export default function InvoicePDF({ formData, vehicles, theme, handleDone}) {
                     rowSpan: N_ROWS_FOR_CHARGES,
                     styles: {
                         fontStyle: 'bold',
-                        fontSize: 8,
+                        fontSize: 12,
                         valign: 'top',
                         textColor: COLOR_RED,
                         fillColor: COLOR_WHITE,
@@ -277,10 +277,11 @@ export default function InvoicePDF({ formData, vehicles, theme, handleDone}) {
                     rowSpan: N_ROWS_FOR_CHARGES,
                     styles: {
                         fontStyle: 'bold',
-                        fontSize: 8,
+                        fontSize: 12,
                         valign: 'top',
                         textColor: COLOR_RED,
                         fillColor: COLOR_WHITE,
+                        halign: 'center' 
                     }
                 });
             }

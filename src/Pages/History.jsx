@@ -246,7 +246,7 @@ export default function History({ theme, onNavigateToForm }) {
                 Invoice History
             </h2>
 
-            <div className="space-y-4 max-w-lg mx-auto">
+            <div className="space-y-4 max-w-lg mx-auto pb-6">
                 {renderStatus()}
                 
                 {/* Render Invoices only if they exist and no error */}
