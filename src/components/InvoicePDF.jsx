@@ -198,7 +198,7 @@ export default function InvoicePDF({ formData, vehicles, theme, handleDone}) {
             },
             // Column 3: Container Type (ColSpan 3)
             {
-                content: `Container Type: ${containerTypeString}`,
+                content: `Cont. Type: ${containerTypeString}`,
                 colSpan: 2,
                 styles: { fontStyle: 'bold', fillColor: COLOR_WHITE, halign: 'right', fontSize: 10, textColor: [0, 0, 0] } // Highlight Type
             }
@@ -217,7 +217,7 @@ export default function InvoicePDF({ formData, vehicles, theme, handleDone}) {
                 styles: { fontStyle: 'bold', fillColor: COLOR_WHITE, halign: 'center', fontSize: 10, textColor: [0, 0, 0] }
             },
             {
-                content: `Back To: ${formData.backTo || ''}`,
+                content: `${formData.backTo?"Back To":""} ${formData.backTo || ''}`,
                 colSpan: 2,
                 styles: { fontStyle: 'bold', fillColor: COLOR_WHITE, halign: 'right', fontSize: 10, textColor: [0, 0, 0] }
             }
@@ -281,7 +281,7 @@ export default function InvoicePDF({ formData, vehicles, theme, handleDone}) {
                         valign: 'top',
                         textColor: COLOR_RED,
                         fillColor: COLOR_WHITE,
-                        halign: 'center' 
+                        halign: 'left' 
                     }
                 });
             }
@@ -397,7 +397,7 @@ export default function InvoicePDF({ formData, vehicles, theme, handleDone}) {
         // 4.2 Invoice/Date Info 
         const formattedBillDate = formatDateForDisplay(formData.billDate);
         
-        doc.setFontSize(10);
+        doc.setFontSize(12);
         doc.setFont(undefined, 'bold');
         doc.setTextColor(255, 0, 0);
         doc.text(`BILL NO. ${formData.invoiceNo || '1'}`, MARGIN + 1, currentY);
