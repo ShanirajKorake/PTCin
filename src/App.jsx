@@ -13,7 +13,7 @@ const TARGET_PIN = '7655';
 
 // Main App Component
 function App() {
-  const [theme, setTheme] = useState("dark");
+  const [theme, setTheme] = useState("light");
   const [currentPage, setPage] = useState("dashboard");
   
   // 1. PIN VERIFICATION STATE

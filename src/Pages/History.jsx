@@ -162,7 +162,8 @@ export default function History({ theme, onNavigateToForm }) {
     // --- Dynamic Theme Classes ---
     const isLight = theme === "light";
     const titleClasses = isLight ? "text-indigo-600" : "text-indigo-400";
-    const cardClasses = isLight ? "bg-white shadow-lg border border-gray-200" : "bg-gray-800 shadow-xl border border-gray-700";
+    const cardClasses = isLight ? "bg-white border border-gray-200" : "bg-gray-800  border border-gray-700";
+    const filterClasses = isLight ? "bg-gray-100 border border-gray-200" : "bg-gray-800 border border-gray-700";
     const subTextClasses = isLight ? "text-gray-600" : "text-gray-400";
     const summaryHeaderClasses = isLight ? "bg-indigo-100 text-indigo-800" : "bg-indigo-900/40 text-indigo-300";
     const containerClasses = isLight ? "bg-gray-50 text-gray-800" : "bg-gray-900 text-white";
@@ -241,12 +242,27 @@ export default function History({ theme, onNavigateToForm }) {
     
     // History List Mode
     return (
-        <div className={`p-4 pt-20 pb-22 w-full ${containerClasses} h-full`}>
-            <h2 className={`text-4xl font-extrabold mb-8 text-center ${titleClasses}`}>
-                Invoice History
-            </h2>
+        <>
+            {/* Filters */}
+            <div className={`z-10 shadow-lg max-w-lg mx-auto p-4 ${filterClasses}  flex gap-4 items-center sticky top-0 `}>
+                <div className={`text-lg font-bold ${textClasses}`}>Filters</div>
+                <div className="flex gap-2 ">
+                    <button className={`px-4 py-2 rounded-md ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} transition`}>
+                        All
+                    </button>
+                    <button className={`px-4 py-2 rounded-md ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} transition`}>
+                        Paid
+                    </button>
+                    <button className={`px-4 py-2 rounded-md ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} transition`}>
+                        Unpaid
+                    </button>
+                </div>
+            </div>
+        
+        <div className={` pb-22 w-full ${containerClasses} h-full`}>
 
-            <div className="space-y-4 max-w-lg mx-auto pb-6">
+
+            <div className="max-w-lg mx-auto pb-6">
                 {renderStatus()}
                 
                 {/* Render Invoices only if they exist and no error */}
@@ -265,7 +281,7 @@ export default function History({ theme, onNavigateToForm }) {
 
 
                     return (
-                        <div key={invoice.id} className={`rounded-xl shadow-md transition-all duration-300 ${cardClasses} overflow-hidden ${isDeleting && isExpanded ? 'opacity-50' : ''}`}>
+                        <div key={invoice.id} className={`shadow-md transition-all duration-300 ${cardClasses} overflow-hidden ${isDeleting && isExpanded ? 'opacity-50' : ''}`}>
                             
                             {/* Header Button */}
                             <button
@@ -408,5 +424,6 @@ export default function History({ theme, onNavigateToForm }) {
                 })}
             </div>
         </div>
+        </>
     );
 }

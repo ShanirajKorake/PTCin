@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Loader2, RefreshCw, Truck, BadgeIndianRupee, Users, Calendar, TrendingUp, ChevronsDown } from 'lucide-react';
 import { getInvoicesHistory } from '../services/dbService';
 import logo from '../assets/logo.jpg';
+import MainStats from '../components/refurbished/MainStats';
 
 // --- CONFIG ---
 const DAYS_FOR_STATS = 30;
@@ -187,19 +188,10 @@ export default function Dashboard({ theme }) {
                 />
             </div>
 
-            <div className="max-w-6xl mx-auto space-y-10">
+            <div className="max-w-6xl mx-auto gap-4 flex flex-col">
                 {/* METRICS GRID */}
-                <div>
-                    <h3 className="text-2xl font-bold mb-4 flex items-center">
-                        <TrendingUp className={`mr-2 ${accent}`} /> Key Financial Metrics
-                    </h3>
-                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                        <StatCard icon={BadgeIndianRupee} title="Total Revenue" value={stats.totalRevenue} isCurrency color="green" theme={theme} />
-                        <StatCard icon={Calendar} title={`Last ${DAYS_FOR_STATS} Days Revenue`} value={stats.last30DaysRevenue} isCurrency color="indigo" theme={theme} />
-                        <StatCard icon={ChevronsDown} title="Total Balance Due" value={stats.totalDueAmount} isCurrency color="red" theme={theme} />
-                        <StatCard icon={Truck} title={`Trips in ${DAYS_FOR_STATS} Days`} value={stats.last30DaysTrips} color="purple" theme={theme} />
-                    </div>
-                </div>
+
+                <MainStats theme={theme} color="green" stats={stats} />
 
                 {/* PARTY ANALYSIS */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
