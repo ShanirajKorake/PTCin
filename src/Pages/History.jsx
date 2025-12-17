@@ -4,6 +4,7 @@ import { getInvoicesHistory, deleteInvoice, clearInvoiceDue } from '../services/
 import InvoicePDF from '../components/InvoicePDF';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
+import { i } from 'framer-motion/client';
 
 // --- Utility Function: Date Format ---
 /**
@@ -33,6 +34,10 @@ export default function History({ theme, onNavigateToForm }) {
     const [expandedId, setExpandedId] = useState(null);
     const [previewData, setPreviewData] = useState(null);
     const [isDeleting, setIsDeleting] = useState(false); // For local loading state
+    const [filterType, setFilterType] = useState('all'); // 'all', 'paid', 'unpaid'
+    const filterOptions = ['all', 'paid', 'unpaid'];
+    const [parties, setParties] = useState([]);
+
 
     // --- Data Fetching Logic (Updated with Error Handling) ---
     const loadHistory = useCallback(async () => {
@@ -41,7 +46,16 @@ export default function History({ theme, onNavigateToForm }) {
         try {
             const fetchedInvoices = await getInvoicesHistory();
             const sortedInvoices = fetchedInvoices.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-            setInvoices(sortedInvoices);
+            const uniqueParties = [...new Set(fetchedInvoices.map(inv => inv.formData.partyName))];
+            setParties(uniqueParties);
+            if (filterType === 'paid') {
+                setInvoices(sortedInvoices.filter(inv => parseFloat(inv.summary.totalBalance || 0) <= 0.01));
+            } else if (filterType === 'unpaid') {
+                setInvoices(sortedInvoices.filter(inv => parseFloat(inv.summary.totalBalance || 0) > 0.01));
+            } else if (filterType === 'all') {
+                setInvoices(sortedInvoices);
+            }
+            
         } catch (e) {
             console.error("Failed to load history:", e);
             setError("Failed to fetch invoice history. Please check your network and Appwrite setup.");
@@ -49,7 +63,7 @@ export default function History({ theme, onNavigateToForm }) {
         } finally {
             setIsLoading(false);
         }
-    }, []);
+    }, [filterType]);
 
     // --- Delete Handler ---
     const handleDelete = async (id, partyName) => {
@@ -244,18 +258,23 @@ export default function History({ theme, onNavigateToForm }) {
     return (
         <>
             {/* Filters */}
-            <div className={`z-10 shadow-lg max-w-lg mx-auto p-4 ${filterClasses}  flex gap-4 items-center sticky top-0 `}>
-                <div className={`text-lg font-bold ${textClasses}`}>Filters</div>
+            <div className={`z-10 shadow-lg max-w-lg mx-auto p-2 ${filterClasses}  flex gap-4 items-center sticky top-0 `}>
                 <div className="flex gap-2 ">
-                    <button className={`px-4 py-2 rounded-md ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} transition`}>
-                        All
+                    <button
+                    className={`px-4 py-2 rounded-full ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} border border-gray-400' : 'border border-gray-400  transition`}>
+                        {filterType.charAt(0).toUpperCase() + filterType.slice(1)} 
                     </button>
-                    <button className={`px-4 py-2 rounded-md ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} transition`}>
-                        Paid
-                    </button>
-                    <button className={`px-4 py-2 rounded-md ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} transition`}>
-                        Unpaid
-                    </button>
+                    {filterOptions.map(option => {
+                        if (option === filterType) return null;
+                        return(
+                        <button
+                            key={option}
+                            onClick={() => setFilterType(option)}
+                            className={`px-4 py-2 rounded-full ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} opacity-50 transition`}
+                        >
+                            {option.charAt(0).toUpperCase() + option.slice(1)}
+                        </button>
+                    )})}
                 </div>
             </div>
         
