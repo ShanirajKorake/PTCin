@@ -4,7 +4,8 @@ import { getInvoicesHistory, deleteInvoice, clearInvoiceDue } from '../services/
 import InvoicePDF from '../components/InvoicePDF';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
-import { i } from 'framer-motion/client';
+import { i, s } from 'framer-motion/client';
+import HistoryInvoiceCard from '../components/refurbished/HistoryInvoiceCard';
 
 // --- Utility Function: Date Format ---
 /**
@@ -37,33 +38,77 @@ export default function History({ theme, onNavigateToForm }) {
     const [filterType, setFilterType] = useState('all'); // 'all', 'paid', 'unpaid'
     const filterOptions = ['all', 'paid', 'unpaid'];
     const [parties, setParties] = useState([]);
+    const [selectedParty, setSelectedParty] = useState('All Parties');
+    const [isPartySelectionDropDownOpen, setIsPartySelectionDropDownOpen] = useState(false)
 
 
-    // --- Data Fetching Logic (Updated with Error Handling) ---
-    const loadHistory = useCallback(async () => {
-        setIsLoading(true);
-        setError(null);
-        try {
-            const fetchedInvoices = await getInvoicesHistory();
-            const sortedInvoices = fetchedInvoices.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-            const uniqueParties = [...new Set(fetchedInvoices.map(inv => inv.formData.partyName))];
-            setParties(uniqueParties);
-            if (filterType === 'paid') {
-                setInvoices(sortedInvoices.filter(inv => parseFloat(inv.summary.totalBalance || 0) <= 0.01));
-            } else if (filterType === 'unpaid') {
-                setInvoices(sortedInvoices.filter(inv => parseFloat(inv.summary.totalBalance || 0) > 0.01));
-            } else if (filterType === 'all') {
-                setInvoices(sortedInvoices);
+    const makeMonthlyEntries = (invoices) => {
+        const monthlyInvoices = {};
+        invoices.forEach(invoice => {
+            const date = new Date(invoice.formData.billDate);
+            const monthYear = `${date.getMonth() + 1}-${date.getFullYear()}`; // e.g., "3-2023"
+            if (!monthlyInvoices[monthYear]) {
+                monthlyInvoices[monthYear] = [];
             }
-            
-        } catch (e) {
-            console.error("Failed to load history:", e);
-            setError("Failed to fetch invoice history. Please check your network and Appwrite setup.");
-            setInvoices([]);
-        } finally {
-            setIsLoading(false);
+            monthlyInvoices[monthYear].push(invoice);
+        });
+        return monthlyInvoices;
+    }
+
+
+    // --- Data Fetching Logic (Refined) ---
+const loadHistory = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+        const fetchedInvoices = await getInvoicesHistory();
+
+        // Sort newest first
+        const sortedInvoices = [...fetchedInvoices].sort(
+            (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
+        );
+
+        // Build party list
+        const uniqueParties = [
+            "All Parties",
+            ...new Set(fetchedInvoices.map(inv => inv.formData.partyName)),
+        ];
+        setParties(uniqueParties);
+
+        // Base dataset (party filter)
+        let filteredInvoices = selectedParty === "All Parties"
+            ? sortedInvoices
+            : sortedInvoices.filter(
+                inv => inv.formData.partyName === selectedParty
+            );
+
+        // Payment status filter
+        if (filterType === "paid") {
+            filteredInvoices = filteredInvoices.filter(
+                inv => parseFloat(inv.summary.totalBalance || 0) <= 0.01
+            );
+        } else if (filterType === "unpaid") {
+            filteredInvoices = filteredInvoices.filter(
+                inv => parseFloat(inv.summary.totalBalance || 0) > 0.01
+            );
         }
-    }, [filterType]);
+        // filterType === "all" → no extra filtering
+
+        setInvoices(makeMonthlyEntries(filteredInvoices));
+    } catch (e) {
+        console.error("Failed to load history:", e);
+        setError(
+            "Failed to fetch invoice history. Please check your network and Appwrite setup."
+        );
+        setInvoices([]);
+    } finally {
+        setIsLoading(false);
+    }
+}, [filterType, selectedParty]);
+
+
+
 
     // --- Delete Handler ---
     const handleDelete = async (id, partyName) => {
@@ -89,8 +134,8 @@ export default function History({ theme, onNavigateToForm }) {
             setIsDeleting(true); // Using this state for any update operation
             try {
                 await clearInvoiceDue(id);
-                setExpandedId(null); 
-                await loadHistory(); 
+                setExpandedId(null);
+                await loadHistory();
             } catch (error) {
                 alert("Could not update payment status. Please try again.");
                 console.error("Clear Due error:", error);
@@ -210,7 +255,7 @@ export default function History({ theme, onNavigateToForm }) {
                 </div>
             );
         }
-        
+
         if (invoices.length === 0) {
             return (
                 <div className={`p-4 py-12 text-center ${cardClasses} max-w-lg mx-auto`}>
@@ -221,7 +266,7 @@ export default function History({ theme, onNavigateToForm }) {
                 </div>
             );
         }
-        
+
         return null;
     };
 
@@ -253,196 +298,259 @@ export default function History({ theme, onNavigateToForm }) {
             </div>
         );
     }
-    
+
     // History List Mode
     return (
         <>
             {/* Filters */}
-            <div className={`z-10 shadow-lg max-w-lg mx-auto p-2 ${filterClasses}  flex gap-4 items-center sticky top-0 `}>
-                <div className="flex gap-2 ">
+            <div className={`z-10 shadow-lg max-w-lg mx-auto p-2 ${filterClasses}  flex gap-4 items-center align-middle sticky top-0 `}>
+                <div className="flex gap-2 items-center align-middle overflow-x-scroll">
+
                     <button
-                    className={`px-4 py-2 rounded-full ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} border border-gray-400' : 'border border-gray-400  transition`}>
-                        {filterType.charAt(0).toUpperCase() + filterType.slice(1)} 
-                    </button>
-                    {filterOptions.map(option => {
-                        if (option === filterType) return null;
-                        return(
-                        <button
-                            key={option}
-                            onClick={() => setFilterType(option)}
-                            className={`px-4 py-2 rounded-full ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} opacity-50 transition`}
+                        className={`px-4 py-2 rounded-xl text-nowrap ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} border border-gray-400' : 'border border-gray-400  transition`}
+                        onClick={()=>{
+                            setIsPartySelectionDropDownOpen(!isPartySelectionDropDownOpen)
+                        }}
                         >
-                            {option.charAt(0).toUpperCase() + option.slice(1)}
-                        </button>
-                    )})}
+                        {selectedParty.charAt(0).toUpperCase() + selectedParty.slice(1)}
+                    </button>
+                    {
+                        isPartySelectionDropDownOpen &&
+                        <>
+                        <div className={`${isLight ? 'text-gray-600' : 'text-gray-500'} font-bold`}>Select a party !!!</div>
+                        </>
+                    }
+                    {!isPartySelectionDropDownOpen &&
+                        <>
+                            <div className={`border-l border-2 rounded-2xl my-2 ${isLight ? 'border-gray-300' : 'border-gray-600'}`}></div>
+                            <button
+                                className={`px-4 py-2 rounded-full ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} border border-gray-400' : 'border border-gray-400  transition`}>
+                                {filterType.charAt(0).toUpperCase() + filterType.slice(1)}
+                            </button>
+                        </>
+                    }
+                    {!isPartySelectionDropDownOpen && filterOptions.map(option => {
+                        if (option === filterType) return null;
+                        return (
+                            <button
+                                key={option}
+                                onClick={() => setFilterType(option)}
+                                className={`px-4 py-2 rounded-full ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} opacity-50 transition`}
+                            >
+                                {option.charAt(0).toUpperCase() + option.slice(1)}
+                            </button>
+                        )
+                    })}
                 </div>
             </div>
-        
-        <div className={` pb-22 w-full ${containerClasses} h-full`}>
-
-
-            <div className="max-w-lg mx-auto pb-6">
-                {renderStatus()}
-                
-                {/* Render Invoices only if they exist and no error */}
-                {!isLoading && !error && invoices.map((invoice) => {
-                    const isExpanded = invoice.id === expandedId;
-                    const summary = invoice.summary;
-                    const formData = invoice.formData;
-                    const vehicles = invoice.vehicles;
-                    const balanceDue = parseFloat(summary.totalBalance || 0);
-                    const isDue = balanceDue > 0.01;
-                    const totalBalanceFormatted = balanceDue.toLocaleString('en-IN', { minimumFractionDigits: 2 });
-                    const dateFormatted = formatDateForDisplay(formData.billDate); 
-                    
-                    // NEW: Construct the container type string
-                    const containerTypeString = `${formData.loadDirection || ''} ${formData.vehicleCount || 0}x${formData.containerSize || ''}`;
-
-
-                    return (
-                        <div key={invoice.id} className={`shadow-md transition-all duration-300 ${cardClasses} overflow-hidden ${isDeleting && isExpanded ? 'opacity-50' : ''}`}>
-                            
-                            {/* Header Button */}
+            {
+                isPartySelectionDropDownOpen &&
+                <><div className={`absolute z-10 h-50 overflow-y-scroll w-full rounded-md border-b  shadow-lg ${isLight ? 'bg-gray-200' : 'bg-gray-700'}`}>
+                    <div className="py-1">
+                        {parties.map((option) => (
                             <button
-                                onClick={() => toggleExpand(invoice.id)}
-                                className="w-full p-4 flex justify-between items-center text-left"
+                                key={option}
+                                onClick={() => {
+                                    setSelectedParty(option)
+                                    setIsPartySelectionDropDownOpen(false)
+                                }}
+                                className={`block w-full text-left px-4 py-2 text-sm ${isLight ? 'hover:bg-gray-300' : 'hover:bg-gray-600'}`}
                             >
-                                <div className="flex-1 min-w-0">
-                                    <p className={`font-bold text-lg ${titleClasses} truncate`}>{formData.partyName}</p>
-                                    <p className={`text-sm ${subTextClasses} mt-1`}>Inv No: {formData.invoiceNo} • Date: {dateFormatted}</p>
-                                </div>
-                                <div className="flex items-center space-x-2 ml-4">
-                                    <p className={`font-bold text-lg ${isDue ? 'text-red-500' : 'text-green-500'}`}>₹{totalBalanceFormatted}</p>
-                                    {isExpanded ? <ChevronUp size={20} className={titleClasses} /> : <ChevronDown size={20} className={titleClasses} />}
-                                </div>
+                                {option.charAt(0).toUpperCase() + option.slice(1)}
                             </button>
+                        ))}
+                    </div>
+                </div></>
+            }
 
-                            {/* --- EXPANDABLE CONTENT --- */}
-                            {isExpanded && (
-                                <div className={`p-4 border-t ${isLight ? 'border-gray-300' : 'border-gray-600'} space-y-4`}>
+            <div className={` pb-22 w-full ${containerClasses} h-full`}>
 
-                                    {/* 1. Trip Details (DD-MM-YYYY format applied, plus Container Type) */}
-                                    <h4 className={`font-bold mt-2 ${titleClasses}`}>Trip & Load Details</h4>
-                                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                                        <p className={`font-semibold ${subTextClasses}`}>Address:</p>
-                                        <p className={`${subTextClasses}`}>{formData.partyAddress}</p>
-                                        
-                                        <p className={`font-semibold ${subTextClasses}`}>Load Type:</p>
-                                        <p className={`${subTextClasses} `}>
-                                            {containerTypeString}
-                                        </p>
-                                        
-                                        <p className={`font-semibold ${subTextClasses}`}>Trip Route:</p>
-                                        <p className={`${subTextClasses}`}>{formData.from} to {formData.to} to {formData.backTo}</p>
-                                        
-                                        <p className={`font-semibold ${subTextClasses}`}>Trip Dates:</p>
-                                        <p className={`${subTextClasses}`}>
-                                            {formatDateForDisplay(formData.loadingDate)} to {formatDateForDisplay(formData.unloadingDate)}
-                                        </p>
-                                    </div>
 
-                                    {/* 2. Vehicles List with Detailed Charges (Updated 'commission' to 'warai') */}
-                                    <h4 className={`font-bold pt-4 ${titleClasses}`}>Vehicles ({vehicles.length})</h4>
-                                    <div className="space-y-3">
-                                        {vehicles.map((v, index) => (
-                                            <div key={index} className={`p-3 rounded-xl ${isLight ? 'bg-gray-100' : 'bg-gray-700'} text-xs border ${isLight ? 'border-gray-200' : 'border-gray-600'}`}>
-                                                <p className="font-semibold text-sm mb-2">{v.vehicleNo} (LR: {v.lrNo})</p>
+                <div className="max-w-lg mx-auto pb-6">
+                    {renderStatus()}
 
-                                                {/* CHARGES BREAKDOWN */}
-                                                <div className="grid grid-cols-2 gap-1">
-                                                    {['freight', 'unloadingCharges', 'detention', 'weightCharges', 'others', 'warai', 'advance'].map(field => ( 
-                                                        <div key={field} className="flex justify-between col-span-1">
-                                                            <p className="font-medium capitalize text-gray-500/70">{field.replace(/([A-Z])/g, ' $1').replace('warai', 'Warai').trim()}:</p>
-                                                            <p className="font-semibold">{parseFloat(v[field]).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                    {!isLoading && !error && Object.keys(invoices).map((monthYear) => {
+                        const [month, year] = monthYear.split('-');
+                        const monthName = new Date(year, month - 1).toLocaleString('default', { month: 'long' });
+                        const monthlyInvoices = invoices[monthYear];
+
+                        return (
+                            <div key={monthYear} className={`${isLight ? 'bg-gray-200' : 'bg-gray-700'}`}>
+                                <h2 className={`w-full flex justify-center items-center text-center pt-2 pb-1 ${isLight ? 'bg-gray-200 text-gray-500' : 'bg-gray-700 text-gray-300'}`}>{monthName} {year}</h2>
+
+                                <div className={`mx-2 rounded-4xl overflow-clip ${isLight ? 'bg-gray-200' : 'bg-gray-700'}`}>
+                                    {!isLoading && !error && monthlyInvoices.map((invoice) => {
+                                        const isExpanded = invoice.id === expandedId;
+                                        const summary = invoice.summary;
+                                        const formData = invoice.formData;
+                                        const vehicles = invoice.vehicles;
+                                        const balanceDue = parseFloat(summary.totalBalance || 0);
+                                        const isDue = balanceDue > 0.01;
+                                        const totalBalanceFormatted = balanceDue.toLocaleString('en-IN', { minimumFractionDigits: 2 });
+                                        const dateFormatted = formatDateForDisplay(formData.billDate);
+
+                                        // NEW: Construct the container type string
+                                        const containerTypeString = `${formData.loadDirection || ''} ${formData.vehicleCount || 0}x${formData.containerSize || ''}`;
+
+
+                                        return (
+                                            <div key={invoice.id} className={`  rounded-xl transition-all duration-300 ${cardClasses} overflow-clip `}>
+
+                                                {/* Header Button */}
+                                                {/* <button
+                                                    onClick={() => toggleExpand(invoice.id)}
+                                                    className="w-full p-4 flex justify-between items-center text-left"
+                                                >
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className={`font-bold text-lg ${titleClasses} truncate`}>{formData.partyName}</p>
+                                                        <p className={`text-sm ${subTextClasses} mt-1`}>Inv No: {formData.invoiceNo} • Date: {dateFormatted}</p>
+                                                    </div>
+                                                    <div className="flex items-center space-x-2 ml-4">
+                                                        <p className={`font-bold text-lg ${isDue ? 'text-red-500' : 'text-green-500'}`}>₹{totalBalanceFormatted}</p>
+                                                        {isExpanded ? <ChevronUp size={20} className={titleClasses} /> : <ChevronDown size={20} className={titleClasses} />}
+                                                    </div>
+                                                </button> */}
+                                                <HistoryInvoiceCard
+                                                    invoice={invoice}
+                                                    isExpanded={isExpanded}
+                                                    onToggle={toggleExpand}
+                                                    isLight={isLight}
+                                                    formatDateForDisplay={formatDateForDisplay}
+                                                    isDue={isDue}
+                                                />
+
+                                                {/* --- EXPANDABLE CONTENT --- */}
+                                                {isExpanded && (
+                                                    <div className={`p-4 border-t ${isLight ? 'border-gray-300' : 'border-gray-600'} space-y-4`}>
+
+                                                        {/* 1. Trip Details (DD-MM-YYYY format applied, plus Container Type) */}
+                                                        <h4 className={`font-bold mt-2 ${titleClasses}`}>Trip & Load Details</h4>
+                                                        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                                                            <p className={`font-semibold ${subTextClasses}`}>Address:</p>
+                                                            <p className={`${subTextClasses}`}>{formData.partyAddress}</p>
+
+                                                            <p className={`font-semibold ${subTextClasses}`}>Load Type:</p>
+                                                            <p className={`${subTextClasses} `}>
+                                                                {containerTypeString}
+                                                            </p>
+
+                                                            <p className={`font-semibold ${subTextClasses}`}>Trip Route:</p>
+                                                            <p className={`${subTextClasses}`}>{formData.from} to {formData.to} to {formData.backTo}</p>
+
+                                                            <p className={`font-semibold ${subTextClasses}`}>Trip Dates:</p>
+                                                            <p className={`${subTextClasses}`}>
+                                                                {formatDateForDisplay(formData.loadingDate)} to {formatDateForDisplay(formData.unloadingDate)}
+                                                            </p>
                                                         </div>
-                                                    ))}
-                                                </div>
 
-                                                <div className="mt-2 pt-2 border-t border-dashed flex justify-between">
-                                                    <p className="font-extrabold text-red-500">Balance Due:</p>
-                                                    <p className="font-extrabold text-red-500">₹{parseFloat(v.balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                                                </div>
+                                                        {/* 2. Vehicles List with Detailed Charges (Updated 'commission' to 'warai') */}
+                                                        <h4 className={`font-bold pt-4 ${titleClasses}`}>Vehicles ({vehicles.length})</h4>
+                                                        <div className="space-y-3">
+                                                            {vehicles.map((v, index) => (
+                                                                <div key={index} className={`p-3 rounded-xl ${isLight ? 'bg-gray-100' : 'bg-gray-700'} text-xs border ${isLight ? 'border-gray-200' : 'border-gray-600'}`}>
+                                                                    <p className="font-semibold text-sm mb-2">{v.vehicleNo} (LR: {v.lrNo})</p>
+
+                                                                    {/* CHARGES BREAKDOWN */}
+                                                                    <div className="grid grid-cols-2 gap-1">
+                                                                        {['freight', 'unloadingCharges', 'detention', 'weightCharges', 'others', 'warai', 'advance'].map(field => (
+                                                                            <div key={field} className="flex justify-between col-span-1">
+                                                                                <p className="font-medium capitalize text-gray-500/70">{field.replace(/([A-Z])/g, ' $1').replace('warai', 'Warai').trim()}:</p>
+                                                                                <p className="font-semibold">{parseFloat(v[field]).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                                                                            </div>
+                                                                        ))}
+                                                                    </div>
+
+                                                                    <div className="mt-2 pt-2 border-t border-dashed flex justify-between">
+                                                                        <p className="font-extrabold text-red-500">Balance Due:</p>
+                                                                        <p className="font-extrabold text-red-500">₹{parseFloat(v.balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+
+                                                        {/* 3. Financial Summary (Unchanged) */}
+                                                        <div className={`mt-3 p-3 rounded-xl ${summaryHeaderClasses}`}>
+                                                            <h4 className="font-bold mb-2">Invoice Summary</h4>
+                                                            <div className="grid grid-cols-2 gap-2 text-sm">
+                                                                <p>Gross Freight:</p>
+                                                                <p className="font-bold text-right">₹{parseFloat(summary.totalFreight).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                                                                <p>Total Advance:</p>
+                                                                <p className="font-bold text-right">₹{parseFloat(summary.totalAdvance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+                                                                <p className={`font-extrabold text-lg ${isDue ? 'text-red-400' : 'text-green-500'}`}>Balance Due:</p>
+                                                                <p className={`font-extrabold text-lg text-right ${isDue ? 'text-red-400' : 'text-green-500'}`}>₹{totalBalanceFormatted}</p>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* --- PRIMARY ACTION BUTTONS: Clear Due / Generate PDF --- */}
+                                                        <div className="flex justify-between pt-4 space-x-4">
+                                                            {isDue ? (
+                                                                <button
+                                                                    onClick={() => handleClearDue(invoice.id, formData.partyName)}
+                                                                    disabled={isDeleting}
+                                                                    className={`flex-1 flex items-center justify-center bg-green-600 text-white px-6 py-3 rounded-2xl shadow-xl hover:bg-green-700 transition-all duration-300 text-lg font-semibold tracking-wide ${isDeleting ? 'opacity-70 cursor-not-allowed' : ''}`}
+                                                                >
+                                                                    {isDeleting ? <Loader2 size={20} className="animate-spin mr-2" /> : <CheckCircle size={20} className="mr-2" />}
+                                                                    {isDeleting ? 'Updating...' : 'Clear Due'}
+                                                                </button>
+                                                            ) : (
+                                                                <div className="flex-1 text-center py-3">
+                                                                    <p className="text-sm font-semibold text-green-500">PAID</p>
+                                                                </div>
+                                                            )}
+
+                                                            {/* GENERATE PDF BUTTON */}
+                                                            <button
+                                                                onClick={() => handleGeneratePDF(invoice)}
+                                                                className={`flex-1 bg-indigo-600 text-white px-6 py-3 rounded-2xl shadow-xl hover:bg-indigo-700 transition-all duration-300 text-lg font-semibold tracking-wide`}
+                                                            >
+                                                                Generate PDF
+                                                            </button>
+                                                        </div>
+
+                                                        {/* --- SECONDARY ACTION BUTTONS: Edit, Duplicate, Delete --- */}
+                                                        <div className={`flex justify-between pt-2 space-x-2 border-t ${isLight ? 'border-gray-200' : 'border-gray-700'}`}>
+
+                                                            <button
+                                                                onClick={() => prepareDataForEdit(invoice)}
+                                                                disabled={isDeleting}
+                                                                className={`flex-1 flex items-center justify-center bg-yellow-600 text-white px-3 py-2 rounded-xl shadow-md transition text-sm font-medium ${isDeleting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-yellow-700'}`}
+                                                            >
+                                                                <Edit size={16} className="mr-1" />
+                                                                Edit
+                                                            </button>
+
+                                                            <button
+                                                                onClick={() => prepareDataForDuplicate(invoice)}
+                                                                disabled={isDeleting}
+                                                                className={`flex-1 flex items-center justify-center bg-blue-600 text-white px-3 py-2 rounded-xl shadow-md transition text-sm font-medium ${isDeleting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-blue-700'}`}
+                                                            >
+                                                                <Copy size={16} className="mr-1" />
+                                                                Duplicate
+                                                            </button>
+
+                                                            <button
+                                                                onClick={() => handleDelete(invoice.id, formData.partyName)}
+                                                                disabled={isDeleting}
+                                                                className={`flex-1 flex items-center justify-center bg-red-600 text-white px-3 py-2 rounded-xl shadow-md transition text-sm font-medium ${isDeleting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-red-700'}`}
+                                                            >
+                                                                <Trash2 size={16} className="mr-1" />
+                                                                Delete
+                                                            </button>
+                                                        </div>
+
+                                                    </div>
+                                                )}
                                             </div>
-                                        ))}
-                                    </div>
-
-                                    {/* 3. Financial Summary (Unchanged) */}
-                                    <div className={`mt-3 p-3 rounded-xl ${summaryHeaderClasses}`}>
-                                        <h4 className="font-bold mb-2">Invoice Summary</h4>
-                                        <div className="grid grid-cols-2 gap-2 text-sm">
-                                            <p>Gross Freight:</p>
-                                            <p className="font-bold text-right">₹{parseFloat(summary.totalFreight).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                                            <p>Total Advance:</p>
-                                            <p className="font-bold text-right">₹{parseFloat(summary.totalAdvance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                                            <p className={`font-extrabold text-lg ${isDue ? 'text-red-400' : 'text-green-500'}`}>Balance Due:</p>
-                                            <p className={`font-extrabold text-lg text-right ${isDue ? 'text-red-400' : 'text-green-500'}`}>₹{totalBalanceFormatted}</p>
-                                        </div>
-                                    </div>
-
-                                    {/* --- PRIMARY ACTION BUTTONS: Clear Due / Generate PDF --- */}
-                                    <div className="flex justify-between pt-4 space-x-4">
-                                        {isDue ? (
-                                            <button
-                                                onClick={() => handleClearDue(invoice.id, formData.partyName)}
-                                                disabled={isDeleting}
-                                                className={`flex-1 flex items-center justify-center bg-green-600 text-white px-6 py-3 rounded-2xl shadow-xl hover:bg-green-700 transition-all duration-300 text-lg font-semibold tracking-wide ${isDeleting ? 'opacity-70 cursor-not-allowed' : ''}`}
-                                            >
-                                                {isDeleting ? <Loader2 size={20} className="animate-spin mr-2" /> : <CheckCircle size={20} className="mr-2" />}
-                                                {isDeleting ? 'Updating...' : 'Clear Due'}
-                                            </button>
-                                        ) : (
-                                            <div className="flex-1 text-center py-3">
-                                                <p className="text-sm font-semibold text-green-500">PAID</p>
-                                            </div>
-                                        )}
-
-                                        {/* GENERATE PDF BUTTON */}
-                                        <button
-                                            onClick={() => handleGeneratePDF(invoice)}
-                                            className={`flex-1 bg-indigo-600 text-white px-6 py-3 rounded-2xl shadow-xl hover:bg-indigo-700 transition-all duration-300 text-lg font-semibold tracking-wide`}
-                                        >
-                                            Generate PDF
-                                        </button>
-                                    </div>
-
-                                    {/* --- SECONDARY ACTION BUTTONS: Edit, Duplicate, Delete --- */}
-                                    <div className={`flex justify-between pt-2 space-x-2 border-t ${isLight ? 'border-gray-200' : 'border-gray-700'}`}>
-
-                                        <button
-                                            onClick={() => prepareDataForEdit(invoice)}
-                                            disabled={isDeleting}
-                                            className={`flex-1 flex items-center justify-center bg-yellow-600 text-white px-3 py-2 rounded-xl shadow-md transition text-sm font-medium ${isDeleting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-yellow-700'}`}
-                                        >
-                                            <Edit size={16} className="mr-1" />
-                                            Edit
-                                        </button>
-
-                                        <button
-                                            onClick={() => prepareDataForDuplicate(invoice)}
-                                            disabled={isDeleting}
-                                            className={`flex-1 flex items-center justify-center bg-blue-600 text-white px-3 py-2 rounded-xl shadow-md transition text-sm font-medium ${isDeleting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-blue-700'}`}
-                                        >
-                                            <Copy size={16} className="mr-1" />
-                                            Duplicate
-                                        </button>
-
-                                        <button
-                                            onClick={() => handleDelete(invoice.id, formData.partyName)}
-                                            disabled={isDeleting}
-                                            className={`flex-1 flex items-center justify-center bg-red-600 text-white px-3 py-2 rounded-xl shadow-md transition text-sm font-medium ${isDeleting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-red-700'}`}
-                                        >
-                                            <Trash2 size={16} className="mr-1" />
-                                            Delete
-                                        </button>
-                                    </div>
-
+                                        );
+                                    })}
                                 </div>
-                            )}
-                        </div>
-                    );
-                })}
+                            </div>
+                        );
+                    })}
+                    {/* Render Invoices only if they exist and no error */}
+
+                </div>
             </div>
-        </div>
         </>
     );
 }
