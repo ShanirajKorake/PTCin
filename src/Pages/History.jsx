@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronUp, Trash2, CheckCircle, Edit, Copy, Loader2, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronUp, Trash2, CheckCircle, Edit, Copy, Loader2, RefreshCw, MoveLeft } from 'lucide-react';
 import { getInvoicesHistory, deleteInvoice, clearInvoiceDue } from '../services/dbService';
 import InvoicePDF from '../components/InvoicePDF';
 import { Filesystem, Directory } from '@capacitor/filesystem';
@@ -40,6 +40,12 @@ export default function History({ theme, onNavigateToForm }) {
     const [parties, setParties] = useState([]);
     const [selectedParty, setSelectedParty] = useState('All Parties');
     const [isPartySelectionDropDownOpen, setIsPartySelectionDropDownOpen] = useState(false)
+    const [selectedMonthFilter, setSelectedMonthFilter] = useState(null); // e.g., "3-2023"
+    const [selectedYearFilter, setSelectedYearFilter] = useState(null); // e.g., "2023"
+    const [uniqueMonths, setUniqueMonths] = useState([]);
+    const [uniqueYears, setUniqueYears] = useState([]);
+    const [isAnyInvoiceExpanded, setIsAnyInvoiceExpanded] = useState(false);
+    const [expandedInvoiceData, setExpandedInvoiceData] = useState(null);
 
 
     const makeMonthlyEntries = (invoices) => {
@@ -57,55 +63,72 @@ export default function History({ theme, onNavigateToForm }) {
 
 
     // --- Data Fetching Logic (Refined) ---
-const loadHistory = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
+    const loadHistory = useCallback(async () => {
+        setIsLoading(true);
+        setError(null);
 
-    try {
-        const fetchedInvoices = await getInvoicesHistory();
+        try {
+            const fetchedInvoices = await getInvoicesHistory();
 
-        // Sort newest first
-        const sortedInvoices = [...fetchedInvoices].sort(
-            (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-        );
-
-        // Build party list
-        const uniqueParties = [
-            "All Parties",
-            ...new Set(fetchedInvoices.map(inv => inv.formData.partyName)),
-        ];
-        setParties(uniqueParties);
-
-        // Base dataset (party filter)
-        let filteredInvoices = selectedParty === "All Parties"
-            ? sortedInvoices
-            : sortedInvoices.filter(
-                inv => inv.formData.partyName === selectedParty
+            // Sort newest first
+            const sortedInvoices = [...fetchedInvoices].sort(
+                (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
             );
 
-        // Payment status filter
-        if (filterType === "paid") {
-            filteredInvoices = filteredInvoices.filter(
-                inv => parseFloat(inv.summary.totalBalance || 0) <= 0.01
+            // Build party list
+            const uniqueParties = [
+                "All Parties",
+                ...new Set(fetchedInvoices.map(inv => inv.formData.partyName)),
+            ];
+            setParties(uniqueParties);
+
+            const uniqueMonthSet = [
+                null,
+                ...new Set(fetchedInvoices.map(inv => {
+                    const date = new Date(inv.formData.billDate);
+                    return `${date.getMonth() + 1}-${date.getFullYear()}`;
+                }))
+            ]
+            setUniqueMonths(uniqueMonthSet);
+            const uniqueYearSet = [
+                null,
+                ...new Set(fetchedInvoices.map(inv => {
+                    const date = new Date(inv.formData.billDate);
+                    return `${date.getFullYear()}`;
+                }))
+            ];
+            setUniqueYears(uniqueYearSet);
+
+            // Base dataset (party filter)
+            let filteredInvoices = selectedParty === "All Parties"
+                ? sortedInvoices
+                : sortedInvoices.filter(
+                    inv => inv.formData.partyName === selectedParty
+                );
+
+            // Payment status filter
+            if (filterType === "paid") {
+                filteredInvoices = filteredInvoices.filter(
+                    inv => parseFloat(inv.summary.totalBalance || 0) <= 0.01
+                );
+            } else if (filterType === "unpaid") {
+                filteredInvoices = filteredInvoices.filter(
+                    inv => parseFloat(inv.summary.totalBalance || 0) > 0.01
+                );
+            }
+            // filterType === "all" → no extra filtering
+
+            setInvoices(makeMonthlyEntries(filteredInvoices));
+        } catch (e) {
+            console.error("Failed to load history:", e);
+            setError(
+                "Failed to fetch invoice history. Please check your network and Appwrite setup."
             );
-        } else if (filterType === "unpaid") {
-            filteredInvoices = filteredInvoices.filter(
-                inv => parseFloat(inv.summary.totalBalance || 0) > 0.01
-            );
+            setInvoices([]);
+        } finally {
+            setIsLoading(false);
         }
-        // filterType === "all" → no extra filtering
-
-        setInvoices(makeMonthlyEntries(filteredInvoices));
-    } catch (e) {
-        console.error("Failed to load history:", e);
-        setError(
-            "Failed to fetch invoice history. Please check your network and Appwrite setup."
-        );
-        setInvoices([]);
-    } finally {
-        setIsLoading(false);
-    }
-}, [filterType, selectedParty]);
+    }, [filterType, selectedParty]);
 
 
 
@@ -147,10 +170,12 @@ const loadHistory = useCallback(async () => {
 
 
     const toggleExpand = (id) => {
+        setIsAnyInvoiceExpanded(id !== expandedId);
         if (expandedId === id) {
             setPreviewData(null);
         }
         setExpandedId(prevId => (prevId === id ? null : id));
+
     };
 
     // --- Generate PDF Data for Preview (Unchanged) ---
@@ -234,7 +259,7 @@ const loadHistory = useCallback(async () => {
     const renderStatus = () => {
         if (isLoading) {
             return (
-                <div className={`p-4 py-12 text-center ${cardClasses} max-w-lg mx-auto`}>
+                <div className={`p-4 py-12 text-center  max-w-lg mx-auto`}>
                     <Loader2 size={30} className={`mx-auto mb-3 animate-spin ${titleClasses}`} />
                     <p className={`font-medium ${textClasses}`}>Loading invoice history...</p>
                 </div>
@@ -275,7 +300,7 @@ const loadHistory = useCallback(async () => {
     if (previewData) {
         // PDF Preview Mode
         return (
-            <div className={`p-4 pt-20 pb-20 w-full ${containerClasses}`}>
+            <div className={`p-4 pt-20 pb-20 w-full  ${containerClasses}`}>
                 <div className="flex justify-between items-center mb-4 max-w-lg mx-auto">
                     <h3 className={`text-xl font-bold ${isLight ? 'text-gray-800' : 'text-white'}`}>Invoice Preview</h3>
                     <button
@@ -302,22 +327,34 @@ const loadHistory = useCallback(async () => {
     // History List Mode
     return (
         <>
-            {/* Filters */}
-            <div className={`z-10 shadow-lg max-w-lg mx-auto p-2 ${filterClasses}  flex gap-4 items-center align-middle sticky top-0 `}>
-                <div className="flex gap-2 items-center align-middle overflow-x-scroll">
+            {
+                isAnyInvoiceExpanded ? (
+                    <>
+                        <div className={`z-10 shadow-lg max-w-lg mx-auto p-3 px-5 ${filterClasses}  flex gap-4 items-center align-middle sticky top-0 `}>
+                            <MoveLeft size={32} className={`flex-none p-1 rounded-full ${isLight ? 'text-gray-100 bg-gray-500' : 'text-gray-600 bg-gray-300'}`} />
+                            <div className="flex-1">
+                                <span className={`font-bold  ${isLight ? 'text-gray-800' : 'text-white'}`}>
+                                    {expandedInvoiceData == null ? 'null' : expandedInvoiceData.formData.partyName}
+                                </span>
+                            </div>
+                        </div>
+                    </>
+                ):(
+                    <><div className={`z-10 shadow-lg max-w-lg mx-auto p-2 ${filterClasses}  flex gap-4 items-center align-middle sticky top-0 `}>
+                <div className="flex gap-2 items-center align-middle overflow-x-auto">
 
                     <button
                         className={`px-4 py-2 rounded-xl text-nowrap ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} border border-gray-400' : 'border border-gray-400  transition`}
-                        onClick={()=>{
+                        onClick={() => {
                             setIsPartySelectionDropDownOpen(!isPartySelectionDropDownOpen)
                         }}
-                        >
+                    >
                         {selectedParty.charAt(0).toUpperCase() + selectedParty.slice(1)}
                     </button>
                     {
                         isPartySelectionDropDownOpen &&
                         <>
-                        <div className={`${isLight ? 'text-gray-600' : 'text-gray-500'} font-bold`}>Select a party !!!</div>
+                            <div className={`${isLight ? 'text-gray-600' : 'text-gray-500'} font-bold`}>Select a party !!!</div>
                         </>
                     }
                     {!isPartySelectionDropDownOpen &&
@@ -342,11 +379,15 @@ const loadHistory = useCallback(async () => {
                         )
                     })}
                 </div>
-            </div>
+            </div></>
+                )
+            }
+            {/* Filters */}
+            
             {
                 isPartySelectionDropDownOpen &&
                 <><div className={`absolute z-10 h-50 overflow-y-scroll w-full rounded-md border-b  shadow-lg ${isLight ? 'bg-gray-200' : 'bg-gray-700'}`}>
-                    <div className="py-1">
+                    <div className=" flex flex-wrap p-2 gap-2">
                         {parties.map((option) => (
                             <button
                                 key={option}
@@ -354,7 +395,7 @@ const loadHistory = useCallback(async () => {
                                     setSelectedParty(option)
                                     setIsPartySelectionDropDownOpen(false)
                                 }}
-                                className={`block w-full text-left px-4 py-2 text-sm ${isLight ? 'hover:bg-gray-300' : 'hover:bg-gray-600'}`}
+                                className={`block w-fit b text-nowrap rounded-full text-left px-4 py-2 text-sm ${isLight ? 'bg-gray-300' : 'bg-gray-600'}`}
                             >
                                 {option.charAt(0).toUpperCase() + option.slice(1)}
                             </button>
@@ -363,24 +404,33 @@ const loadHistory = useCallback(async () => {
                 </div></>
             }
 
-            <div className={` pb-22 w-full ${containerClasses} h-full`}>
+            <div className={` pb-22 w-full ${containerClasses} ${isLight ? 'bg-gray-200' : 'bg-gray-700'}  h-fit min-h-screen`}>
 
 
-                <div className="max-w-lg mx-auto pb-6">
+                <div className={`max-w-lg mx-auto pb-6  ${isLight ? 'bg-gray-200' : 'bg-gray-700'}`}>
                     {renderStatus()}
-
+                    {!isLoading && !error && Object.keys(invoices).length === 0 && (
+                        <div className={`p-4 py-12 text-center ${isLight ? 'bg-gray-200' : 'bg-gray-700'} min-h-screen flex-col items-center align-middle max-w-lg mx-auto`}>
+                            <span role="img" aria-label="Empty" className="text-4xl block mb-3">
+                                📭
+                            </span>
+                            <p className={`font-medium ${textClasses}`}>No records found with the selected filters.</p>
+                        </div>
+                    )}
                     {!isLoading && !error && Object.keys(invoices).map((monthYear) => {
                         const [month, year] = monthYear.split('-');
                         const monthName = new Date(year, month - 1).toLocaleString('default', { month: 'long' });
                         const monthlyInvoices = invoices[monthYear];
 
                         return (
-                            <div key={monthYear} className={`${isLight ? 'bg-gray-200' : 'bg-gray-700'}`}>
+                            <div key={monthYear} className={` ${isLight ? 'bg-gray-200' : 'bg-gray-700'}`}>
                                 <h2 className={`w-full flex justify-center items-center text-center pt-2 pb-1 ${isLight ? 'bg-gray-200 text-gray-500' : 'bg-gray-700 text-gray-300'}`}>{monthName} {year}</h2>
 
                                 <div className={`mx-2 rounded-4xl overflow-clip ${isLight ? 'bg-gray-200' : 'bg-gray-700'}`}>
                                     {!isLoading && !error && monthlyInvoices.map((invoice) => {
-                                        const isExpanded = invoice.id === expandedId;
+
+                        
+
                                         const summary = invoice.summary;
                                         const formData = invoice.formData;
                                         const vehicles = invoice.vehicles;
@@ -412,15 +462,18 @@ const loadHistory = useCallback(async () => {
                                                 </button> */}
                                                 <HistoryInvoiceCard
                                                     invoice={invoice}
-                                                    isExpanded={isExpanded}
-                                                    onToggle={toggleExpand}
+                                                    isExpanded={isAnyInvoiceExpanded}
+                                                    setIsExpanded ={setIsAnyInvoiceExpanded}
+                                                    setExpandedId={setExpandedId}
                                                     isLight={isLight}
                                                     formatDateForDisplay={formatDateForDisplay}
                                                     isDue={isDue}
+                                                    setPreviewData={setExpandedInvoiceData}
+                                                    previewData={expandedInvoiceData}
                                                 />
 
                                                 {/* --- EXPANDABLE CONTENT --- */}
-                                                {isExpanded && (
+                                                {isAnyInvoiceExpanded && (
                                                     <div className={`p-4 border-t ${isLight ? 'border-gray-300' : 'border-gray-600'} space-y-4`}>
 
                                                         {/* 1. Trip Details (DD-MM-YYYY format applied, plus Container Type) */}

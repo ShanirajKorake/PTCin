@@ -11,7 +11,7 @@ export default function NewInvoice({ theme, initialData, contextTitle }) {
 
   return (
     // Apply the dynamic container classes
-    <div className={` text-center w-full h-full ${containerClasses}`}>
+    <div className={` text-center w-full  ${containerClasses}`}>
         
         {/* Removed: <h2 className="text-4xl font-extrabold mb-8 text-indigo-400">Create New Invoice</h2> */}
         

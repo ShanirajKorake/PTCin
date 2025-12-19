@@ -1,10 +1,10 @@
 import { ArrowLeft, ArrowRight, Dot, MoveRight } from 'lucide-react'
 import React from 'react'
 
-export default function HistoryInvoiceCard({ invoice, isExpanded, onToggle, isLight, formatDateForDisplay, isDue }) {
-    
-    const subTextClasses = isLight ? "text-gray-500":"text-gray-500"
-    const formatDateWithMonthName = (dateString) =>{
+export default function HistoryInvoiceCard({ invoice, setIsExpanded, isExpanded, setExpandedId, isLight, formatDateForDisplay, isDue, setPreviewData, previewData }) {
+
+    const subTextClasses = isLight ? "text-gray-500" : "text-gray-500"
+    const formatDateWithMonthName = (dateString) => {
         const options = { year: 'numeric', month: 'long', day: 'numeric' };
         return new Date(dateString).toLocaleDateString(undefined, options);
     }
@@ -12,18 +12,25 @@ export default function HistoryInvoiceCard({ invoice, isExpanded, onToggle, isLi
         <>
             <button
                 className={`w-full px-4 py-3  transition-colors`}
-                onClick={() => onToggle(invoice.id)}
+                onClick={() => {
+                    setIsExpanded(prev => !prev);
+                    setExpandedId(invoice.id);
+
+                    setPreviewData(prev =>
+                        prev === null ? invoice : null
+                    );
+                }}
             >
                 <p className={`text-sm flex items-center align-middle justify-center font-semibold text-left ${subTextClasses}`}>
-        
-                        {invoice.formData.invoiceNo}
-        
-                    <Dot size={24}/>
-                    
+
+                    {invoice.formData.invoiceNo}
+
+                    <Dot size={24} />
+
                     {`${formatDateWithMonthName(invoice.formData.billDate)}`}
 
                 </p>
-                <div className={`w-full text-center text-lg  font-bold ${isLight ? "text-gray-700" :"text-gray-300"}`}>
+                <div className={`w-full text-center text-lg  font-bold ${isLight ? "text-gray-700" : "text-gray-300"}`}>
                     {invoice.formData.partyName}
                 </div>
 
@@ -31,18 +38,19 @@ export default function HistoryInvoiceCard({ invoice, isExpanded, onToggle, isLi
                     <div className='  flex align-middle items-center justify-center w-full '>
                         <p className={`text-2xl pb-1 font-bold text-right ${isDue ? 'text-red-500' : 'line-through text-gray-500'}`}>{`Rs. ${invoice.summary.totalFreight}`}</p>
                         {!isDue &&
-                        <div className='flex'>
-                        <Dot size={24} className={subTextClasses}/>
-                        <div className={`text-left text-green-500 font-bold`}>
-                            PAID
-                        </div>
-                        </div>
+                            <div className='flex'>
+                                <Dot size={24} className={subTextClasses} />
+                                <div className={`text-left text-green-500 font-bold`}>
+                                    PAID
+                                </div>
+                            </div>
                         }
                     </div>
                 </div>
                 <div className={`text-wrap text-sm flex items-center align-middle gap-2  ${isLight ? 'bg-gray-200' : 'bg-gray-700'} rounded-full py-2 px-3`}>
                     <div className='flex-2 flex flex-col items-center justify-center'>
                         {invoice.formData.from}
+
                         <div className={`text-sm w-fit font-normal rounded-full px-1 ${isLight ? 'bg-gray-400 text-gray-100' : 'bg-gray-500 text-gray-800'}`}>
                             {formatDateForDisplay(invoice.formData.loadingDate)}
                         </div>
@@ -51,18 +59,27 @@ export default function HistoryInvoiceCard({ invoice, isExpanded, onToggle, isLi
                     <MoveRight size={24} className='flex-none' />
                     <div className='flex-2 flex flex-col items-center justify-center'>
                         {invoice.formData.to}
-                        <div className={`text-sm w-fit font-normal rounded-full px-1 ${isLight ? 'bg-gray-400 text-gray-100' : 'bg-gray-500 text-gray-800'}`}>
-                            {formatDateForDisplay(invoice.formData.unloadingDate)}
-                        </div>
+                        {invoice.formData.backTo == "" ? (
+                            <div className={`text-sm w-fit font-normal rounded-full px-1 ${isLight ? 'bg-gray-400 text-gray-100' : 'bg-gray-500 text-gray-800'}`}>
+                                {formatDateForDisplay(invoice.formData.unloadingDate)}
+                            </div>
+                        ) : null}
                     </div>
                     {
                         (invoice.formData.backTo != "") && <>
-                    <MoveRight size={24} className='flex-none' />
-                            <p className='flex-2'>{invoice.formData.backTo}</p>
+                            <MoveRight size={24} className='flex-none' />
+                            <div className='flex flex-2 flex-col items-center justify-center'>
+                                <div className='w-full flex text-center justify-center'>
+                                    {invoice.formData.backTo}
+                                </div>
+                                <div className={`text-sm w-fit font-normal rounded-full px-1 ${isLight ? 'bg-gray-400 text-gray-100' : 'bg-gray-500 text-gray-800'}`}>
+                                    {formatDateForDisplay(invoice.formData.unloadingDate)}
+                                </div>
+                            </div>
                         </>
                     }
                 </div>
-                
+
             </button>
         </>
     )

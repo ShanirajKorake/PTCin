@@ -82,8 +82,8 @@ const Header = ({ toggleTheme, theme, title }) => {
     : "bg-gray-800 text-white shadow-xl border-b border-gray-700";
 
   const titleColor = theme === "light"
-    ? "text-indigo-600"
-    : "text-indigo-400";
+    ? "text-gray-700"
+    : "text-gray-300";
 
   const toggleButtonClasses = theme === "light"
     ? "p-2 rounded-full bg-gray-100 text-gray-800 hover:bg-indigo-200 transition duration-150 transform hover:scale-105"

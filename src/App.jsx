@@ -8,6 +8,7 @@ import Dashboard from "./Pages/Dashboard";
 import History from "./Pages/History";
 import './index.css';
 import { StatusBar, Style } from "@capacitor/status-bar";
+import { i } from "framer-motion/client";
 // Define the target PIN globally or within the component scope
 const TARGET_PIN = '7655';
 
@@ -222,7 +223,7 @@ function App() {
         />
 
         {/* Main Content Area: Scrollable middle section */}
-        <main className="flex-grow overflow-y-auto">
+        <main className={`flex-grow overflow-y-auto h-screen ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-200' }`} >
             {renderPage()}
         </main>
 
