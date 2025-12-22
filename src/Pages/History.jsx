@@ -1,11 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { ChevronDown, ChevronUp, Trash2, CheckCircle, Edit, Copy, Loader2, RefreshCw, MoveLeft } from 'lucide-react';
+import React, { useState, useEffect, useCallback, use, useRef } from 'react';
+import { ChevronDown, ChevronUp, Trash2, CheckCircle, Edit, Copy, Loader2, RefreshCw, MoveLeft, Dot, BadgeX } from 'lucide-react';
 import { getInvoicesHistory, deleteInvoice, clearInvoiceDue } from '../services/dbService';
 import InvoicePDF from '../components/InvoicePDF';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
 import { i, s } from 'framer-motion/client';
 import HistoryInvoiceCard from '../components/refurbished/HistoryInvoiceCard';
+import ExpandedInvoiceCard from '../components/refurbished/ExpandedInvoiceCard';
+import { motion } from 'framer-motion';
 
 // --- Utility Function: Date Format ---
 /**
@@ -26,9 +28,13 @@ const formatDateForDisplay = (dateString) => {
     }
     return new Date(dateString).toLocaleDateString('en-IN');
 };
+const formatDateWithMonthName = (dateString) => {
+    const options = { year: 'numeric', month: 'long', day: 'numeric' };
+    return new Date(dateString).toLocaleDateString(undefined, options);
+}
 
 
-export default function History({ theme, onNavigateToForm }) {
+export default function History({ theme, onNavigateToForm, filterFromDashboard, setfilterfromRedirecton }) {
     const [invoices, setInvoices] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState(null); // State for errors
@@ -40,13 +46,10 @@ export default function History({ theme, onNavigateToForm }) {
     const [parties, setParties] = useState([]);
     const [selectedParty, setSelectedParty] = useState('All Parties');
     const [isPartySelectionDropDownOpen, setIsPartySelectionDropDownOpen] = useState(false)
-    const [selectedMonthFilter, setSelectedMonthFilter] = useState(null); // e.g., "3-2023"
-    const [selectedYearFilter, setSelectedYearFilter] = useState(null); // e.g., "2023"
-    const [uniqueMonths, setUniqueMonths] = useState([]);
-    const [uniqueYears, setUniqueYears] = useState([]);
+
     const [isAnyInvoiceExpanded, setIsAnyInvoiceExpanded] = useState(false);
     const [expandedInvoiceData, setExpandedInvoiceData] = useState(null);
-
+    const mainContainerRef = useRef(null);
 
     const makeMonthlyEntries = (invoices) => {
         const monthlyInvoices = {};
@@ -62,72 +65,88 @@ export default function History({ theme, onNavigateToForm }) {
     }
 
 
+
     // --- Data Fetching Logic (Refined) ---
     const loadHistory = useCallback(async () => {
         setIsLoading(true);
         setError(null);
 
+        // 1. Handle Redirect Logic immediately
+        let activeParty = selectedParty;
+        let activeFilter = filterType;
+
+        if (filterFromDashboard.mode === "party") {
+            activeFilter = filterFromDashboard.type
+            activeParty = filterFromDashboard.data;
+
+            // Update state for UI consistency
+            setFilterType(activeFilter);
+            setSelectedParty(activeParty);
+
+
+            // Reset redirect state
+            setfilterfromRedirecton();
+        }
+
+
         try {
             const fetchedInvoices = await getInvoicesHistory();
 
-            // Sort newest first
-            const sortedInvoices = [...fetchedInvoices].sort(
-                (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-            );
+            // 2. Single-pass processing for Parties and Sorting
+            const partySet = new Set(["All Parties"]);
 
-            // Build party list
-            const uniqueParties = [
-                "All Parties",
-                ...new Set(fetchedInvoices.map(inv => inv.formData.partyName)),
-            ];
-            setParties(uniqueParties);
+            // Sort newest first - converting to value once for performance
+            const sortedInvoices = fetchedInvoices.sort((a, b) => {
+                return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+            });
 
-            const uniqueMonthSet = [
-                null,
-                ...new Set(fetchedInvoices.map(inv => {
-                    const date = new Date(inv.formData.billDate);
-                    return `${date.getMonth() + 1}-${date.getFullYear()}`;
-                }))
-            ]
-            setUniqueMonths(uniqueMonthSet);
-            const uniqueYearSet = [
-                null,
-                ...new Set(fetchedInvoices.map(inv => {
-                    const date = new Date(inv.formData.billDate);
-                    return `${date.getFullYear()}`;
-                }))
-            ];
-            setUniqueYears(uniqueYearSet);
+            // 3. Efficiently build the party list and filter in one go
+            const filtered = [];
+            for (const inv of sortedInvoices) {
+                // Collect unique parties
+                partySet.add(inv.formData.partyName);
 
-            // Base dataset (party filter)
-            let filteredInvoices = selectedParty === "All Parties"
-                ? sortedInvoices
-                : sortedInvoices.filter(
-                    inv => inv.formData.partyName === selectedParty
-                );
+                // Apply Filters
+                const matchesParty = activeParty === "All Parties" || inv.formData.partyName === activeParty;
+                if (!matchesParty) continue;
 
-            // Payment status filter
-            if (filterType === "paid") {
-                filteredInvoices = filteredInvoices.filter(
-                    inv => parseFloat(inv.summary.totalBalance || 0) <= 0.01
-                );
-            } else if (filterType === "unpaid") {
-                filteredInvoices = filteredInvoices.filter(
-                    inv => parseFloat(inv.summary.totalBalance || 0) > 0.01
-                );
+                const balance = parseFloat(inv.summary.totalBalance || 0);
+                const isPaid = balance <= 0.01;
+
+                if (activeFilter === "paid" && isPaid) {
+                    filtered.push(inv);
+                } else if (activeFilter === "unpaid" && !isPaid) {
+                    filtered.push(inv);
+                } else if (activeFilter === "all") {
+                    filtered.push(inv);
+                }
             }
-            // filterType === "all" → no extra filtering
 
-            setInvoices(makeMonthlyEntries(filteredInvoices));
+            setParties(Array.from(partySet));
+            setInvoices(makeMonthlyEntries(filtered));
+
+            if (filterFromDashboard.mode === "trip") {
+                let selectedId = filterFromDashboard.data
+
+                setExpandedId(selectedId)
+                setIsAnyInvoiceExpanded(true)
+                setExpandedInvoiceData(sortedInvoices.find(inv => inv.id === selectedId))
+
+                setfilterfromRedirecton()
+            }
+
         } catch (e) {
             console.error("Failed to load history:", e);
-            setError(
-                "Failed to fetch invoice history. Please check your network and Appwrite setup."
-            );
+            setError("Failed to fetch invoice history. Please check your network.");
             setInvoices([]);
         } finally {
             setIsLoading(false);
+
         }
+
+
+        // We remove selectedParty and filterType from dependencies if we want 
+        // this to only run once on mount, or keep them if it should re-run on UI toggle.
     }, [filterType, selectedParty]);
 
 
@@ -217,10 +236,17 @@ export default function History({ theme, onNavigateToForm }) {
         }
     };
 
+
+
     // --- Initial Load Effect ---
     useEffect(() => {
         loadHistory();
+
     }, [loadHistory]);
+
+
+
+
 
     // --- Data Preparation Functions (Unchanged) ---
     const prepareDataForEdit = (invoice) => {
@@ -247,7 +273,7 @@ export default function History({ theme, onNavigateToForm }) {
     const isLight = theme === "light";
     const titleClasses = isLight ? "text-indigo-600" : "text-indigo-400";
     const cardClasses = isLight ? "bg-white border border-gray-200" : "bg-gray-800  border border-gray-700";
-    const filterClasses = isLight ? "bg-gray-100 border border-gray-200" : "bg-gray-800 border border-gray-700";
+    const filterClasses = isLight ? "bg-gray-100 " : "bg-gray-800";
     const subTextClasses = isLight ? "text-gray-600" : "text-gray-400";
     const summaryHeaderClasses = isLight ? "bg-indigo-100 text-indigo-800" : "bg-indigo-900/40 text-indigo-300";
     const containerClasses = isLight ? "bg-gray-50 text-gray-800" : "bg-gray-900 text-white";
@@ -300,154 +326,217 @@ export default function History({ theme, onNavigateToForm }) {
     if (previewData) {
         // PDF Preview Mode
         return (
-            <div className={`p-4 pt-20 pb-20 w-full  ${containerClasses}`}>
-                <div className="flex justify-between items-center mb-4 max-w-lg mx-auto">
-                    <h3 className={`text-xl font-bold ${isLight ? 'text-gray-800' : 'text-white'}`}>Invoice Preview</h3>
-                    <button
-                        onClick={closePreview}
-                        className={`flex items-center gap-1 ${isLight ? 'text-gray-600 border border-gray-300 hover:bg-gray-100' : 'text-gray-300 border border-gray-600 hover:bg-gray-700'} px-3 py-1.5 rounded-lg transition text-sm font-medium`}
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-                        </svg> Back
+            <div className={` pb-20 w-full  ${containerClasses}`}>
+                <div className={`z-10 shadow-lg max-w-lg mx-auto p-3 px-5 ${filterClasses}  flex gap-4 items-center align-middle sticky top-0 `}>
+                    <button onClick={closePreview}>
+
+                        <MoveLeft size={32} className={`flex-none p-1 rounded-full ${isLight ? 'text-gray-100 bg-gray-500' : 'text-gray-600 bg-gray-300'}`} />
                     </button>
+                    <div className="flex-1">
+                        <span className={`font-bold flex align-middle items-center ${isLight ? 'text-gray-800' : 'text-white'}`}>
+                            <div>{expandedInvoiceData.formData.invoiceNo}</div>
+                            <Dot size={24} className={subTextClasses} />
+                            <div>PDF Priview</div>
+                        </span>
+                    </div>
                 </div>
-                <InvoicePDF
-                    formData={previewData.formData}
-                    vehicles={previewData.vehicles}
-                    theme={theme}
-                    pdfData={previewData}
-                    handleShare={handleShare}
-                    handleDone={closePreview}
-                />
+                <div className='pt-5'>
+
+                    <InvoicePDF
+                        formData={previewData.formData}
+                        vehicles={previewData.vehicles}
+                        theme={theme}
+                        pdfData={previewData}
+                        handleShare={handleShare}
+                        handleDone={closePreview}
+                    />
+                </div>
             </div>
         );
     }
 
     // History List Mode
     return (
-        <>
-            {
-                isAnyInvoiceExpanded ? (
-                    <>
-                        <div className={`z-10 shadow-lg max-w-lg mx-auto p-3 px-5 ${filterClasses}  flex gap-4 items-center align-middle sticky top-0 `}>
-                            <MoveLeft size={32} className={`flex-none p-1 rounded-full ${isLight ? 'text-gray-100 bg-gray-500' : 'text-gray-600 bg-gray-300'}`} />
-                            <div className="flex-1">
-                                <span className={`font-bold  ${isLight ? 'text-gray-800' : 'text-white'}`}>
-                                    {expandedInvoiceData == null ? 'null' : expandedInvoiceData.formData.partyName}
-                                </span>
+        <div ref={mainContainerRef} className='flex flex-col overflow-y-hidden h-full w-full'>
+            <div>
+
+                {
+                    isAnyInvoiceExpanded ? (
+                        <>
+                            <div className={`z-10 shadow-lg max-w-lg mx-auto p-3 px-5 ${filterClasses}  flex gap-4 items-center align-middle sticky top-0 `}>
+                                <button onClick={() => {
+                                    setIsAnyInvoiceExpanded(false);
+                                    setExpandedInvoiceData(null);
+                                    setExpandedId(null);
+                                }}>
+
+                                    <MoveLeft size={32} className={`flex-none p-1 rounded-full ${isLight ? 'text-gray-100 bg-gray-500' : 'text-gray-600 bg-gray-300'}`} />
+                                </button>
+                                <div className="flex-1">
+                                    <span className={`font-bold flex align-middle items-center ${isLight ? 'text-gray-800' : 'text-white'}`}>
+                                        <div>{expandedInvoiceData.formData.invoiceNo}</div>
+                                        <Dot size={24} className={subTextClasses} />
+                                        <div>{formatDateWithMonthName(expandedInvoiceData.formData.billDate)}</div>
+                                    </span>
+                                </div>
+                            </div>
+                        </>
+                    ) : (
+                        <><div className={`z-10 shadow-lg max-w-lg mx-auto p-2 ${filterClasses}  flex gap-4 items-center align-middle sticky top-0 `}>
+                            <div className="flex gap-2 items-center align-middle overflow-x-auto">
+
+                                <button
+                                    className={`px-4 py-2 rounded-xl text-nowrap ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} border border-gray-400' : 'border border-gray-400  transition`}
+                                    onClick={() => {
+                                        setIsPartySelectionDropDownOpen(!isPartySelectionDropDownOpen)
+                                    }}
+                                >
+                                    {selectedParty.charAt(0).toUpperCase() + selectedParty.slice(1)}
+                                </button>
+                                {
+                                    isPartySelectionDropDownOpen &&
+                                    <>
+                                        <div className={`${isLight ? 'text-gray-600' : 'text-gray-500'} font-bold`}>Select a party !!!</div>
+                                    </>
+                                }
+                                {!isPartySelectionDropDownOpen &&
+                                    <>
+                                        <div className={`border-l border-2 rounded-2xl my-2 ${isLight ? 'border-gray-300' : 'border-gray-600'}`}></div>
+                                        <button
+                                            className={`px-4 py-2 rounded-full ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} border border-gray-400' : 'border border-gray-400  transition`}>
+                                            {filterType.charAt(0).toUpperCase() + filterType.slice(1)}
+                                        </button>
+                                    </>
+                                }
+                                {!isPartySelectionDropDownOpen && filterOptions.map(option => {
+                                    if (option === filterType) return null;
+                                    return (
+                                        <button
+                                            key={option}
+                                            onClick={() => setFilterType(option)}
+                                            className={`px-4 py-2 rounded-full ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} opacity-50 transition`}
+                                        >
+                                            {option.charAt(0).toUpperCase() + option.slice(1)}
+                                        </button>
+                                    )
+                                })}
                             </div>
                         </div>
-                    </>
-                ):(
-                    <><div className={`z-10 shadow-lg max-w-lg mx-auto p-2 ${filterClasses}  flex gap-4 items-center align-middle sticky top-0 `}>
-                <div className="flex gap-2 items-center align-middle overflow-x-auto">
+                            {
+                                !isAnyInvoiceExpanded && (selectedParty !== "All Parties" || filterType !== "all") &&
+                                <><motion.div
+                                    initial={{ opacity: 0, y: -20 }}
+                                    whileInView={{ opacity: 1, y: 1 }}
+                                    transition={{ duration: 0.1 }}
+                                    viewport={{ once: true }}
+                                    className={`absolute  overflow-y-scroll w-full rounded-md `}
+                                >
+                                    <div className=" flex items-center align-middle  ">
+                                        <button className={`flex gap-1 items-center shadow-lg align-middle p-1 text-sm rounded-br-xl ${isLight ? "bg-gray-300" : "bg-gray-600"}`}
+                                            onClick={() => {
+                                                setSelectedParty("All Parties")
+                                                setFilterType("all")
+                                            }}
+                                        >
 
-                    <button
-                        className={`px-4 py-2 rounded-xl text-nowrap ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} border border-gray-400' : 'border border-gray-400  transition`}
-                        onClick={() => {
-                            setIsPartySelectionDropDownOpen(!isPartySelectionDropDownOpen)
-                        }}
-                    >
-                        {selectedParty.charAt(0).toUpperCase() + selectedParty.slice(1)}
-                    </button>
-                    {
-                        isPartySelectionDropDownOpen &&
-                        <>
-                            <div className={`${isLight ? 'text-gray-600' : 'text-gray-500'} font-bold`}>Select a party !!!</div>
+                                            <BadgeX size={24} className='p-0.5' />
+                                            <div>Clear Filters</div>
+                                        </button>
+                                    </div>
+                                </motion.div></>
+                            }
+
                         </>
-                    }
-                    {!isPartySelectionDropDownOpen &&
-                        <>
-                            <div className={`border-l border-2 rounded-2xl my-2 ${isLight ? 'border-gray-300' : 'border-gray-600'}`}></div>
-                            <button
-                                className={`px-4 py-2 rounded-full ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} border border-gray-400' : 'border border-gray-400  transition`}>
-                                {filterType.charAt(0).toUpperCase() + filterType.slice(1)}
-                            </button>
-                        </>
-                    }
-                    {!isPartySelectionDropDownOpen && filterOptions.map(option => {
-                        if (option === filterType) return null;
-                        return (
-                            <button
-                                key={option}
-                                onClick={() => setFilterType(option)}
-                                className={`px-4 py-2 rounded-full ${isLight ? 'bg-gray-200 hover:bg-gray-300' : 'bg-gray-700 hover:bg-gray-600'} opacity-50 transition`}
-                            >
-                                {option.charAt(0).toUpperCase() + option.slice(1)}
-                            </button>
-                        )
-                    })}
-                </div>
-            </div></>
-                )
-            }
-            {/* Filters */}
-            
-            {
-                isPartySelectionDropDownOpen &&
-                <><div className={`absolute z-10 h-50 overflow-y-scroll w-full rounded-md border-b  shadow-lg ${isLight ? 'bg-gray-200' : 'bg-gray-700'}`}>
-                    <div className=" flex flex-wrap p-2 gap-2">
-                        {parties.map((option) => (
-                            <button
-                                key={option}
-                                onClick={() => {
-                                    setSelectedParty(option)
-                                    setIsPartySelectionDropDownOpen(false)
-                                }}
-                                className={`block w-fit b text-nowrap rounded-full text-left px-4 py-2 text-sm ${isLight ? 'bg-gray-300' : 'bg-gray-600'}`}
-                            >
-                                {option.charAt(0).toUpperCase() + option.slice(1)}
-                            </button>
-                        ))}
-                    </div>
-                </div></>
-            }
-
-            <div className={` pb-22 w-full ${containerClasses} ${isLight ? 'bg-gray-200' : 'bg-gray-700'}  h-fit min-h-screen`}>
-
-
-                <div className={`max-w-lg mx-auto pb-6  ${isLight ? 'bg-gray-200' : 'bg-gray-700'}`}>
-                    {renderStatus()}
-                    {!isLoading && !error && Object.keys(invoices).length === 0 && (
-                        <div className={`p-4 py-12 text-center ${isLight ? 'bg-gray-200' : 'bg-gray-700'} min-h-screen flex-col items-center align-middle max-w-lg mx-auto`}>
-                            <span role="img" aria-label="Empty" className="text-4xl block mb-3">
-                                📭
-                            </span>
-                            <p className={`font-medium ${textClasses}`}>No records found with the selected filters.</p>
+                    )
+                }
+                {/* Filters */}
+                {
+                    isPartySelectionDropDownOpen && !isAnyInvoiceExpanded &&
+                    <><div className={`absolute z-10 h-50 overflow-y-scroll w-full rounded-md border-b  shadow-lg ${isLight ? 'bg-gray-200' : 'bg-gray-700'}`}>
+                        <div className=" flex flex-wrap p-2 gap-2">
+                            {parties.map((option) => (
+                                <button
+                                    key={option}
+                                    onClick={() => {
+                                        setSelectedParty(option)
+                                        setIsPartySelectionDropDownOpen(false)
+                                    }}
+                                    className={`block w-fit b text-nowrap rounded-full text-left px-4 py-2 text-sm ${isLight ? 'bg-gray-300' : 'bg-gray-600'}`}
+                                >
+                                    {option.charAt(0).toUpperCase() + option.slice(1)}
+                                </button>
+                            ))}
                         </div>
-                    )}
-                    {!isLoading && !error && Object.keys(invoices).map((monthYear) => {
-                        const [month, year] = monthYear.split('-');
-                        const monthName = new Date(year, month - 1).toLocaleString('default', { month: 'long' });
-                        const monthlyInvoices = invoices[monthYear];
-
-                        return (
-                            <div key={monthYear} className={` ${isLight ? 'bg-gray-200' : 'bg-gray-700'}`}>
-                                <h2 className={`w-full flex justify-center items-center text-center pt-2 pb-1 ${isLight ? 'bg-gray-200 text-gray-500' : 'bg-gray-700 text-gray-300'}`}>{monthName} {year}</h2>
-
-                                <div className={`mx-2 rounded-4xl overflow-clip ${isLight ? 'bg-gray-200' : 'bg-gray-700'}`}>
-                                    {!isLoading && !error && monthlyInvoices.map((invoice) => {
-
-                        
-
-                                        const summary = invoice.summary;
-                                        const formData = invoice.formData;
-                                        const vehicles = invoice.vehicles;
-                                        const balanceDue = parseFloat(summary.totalBalance || 0);
-                                        const isDue = balanceDue > 0.01;
-                                        const totalBalanceFormatted = balanceDue.toLocaleString('en-IN', { minimumFractionDigits: 2 });
-                                        const dateFormatted = formatDateForDisplay(formData.billDate);
-
-                                        // NEW: Construct the container type string
-                                        const containerTypeString = `${formData.loadDirection || ''} ${formData.vehicleCount || 0}x${formData.containerSize || ''}`;
+                    </div></>
+                }
 
 
-                                        return (
-                                            <div key={invoice.id} className={`  rounded-xl transition-all duration-300 ${cardClasses} overflow-clip `}>
 
-                                                {/* Header Button */}
-                                                {/* <button
+
+            </div >
+
+            {
+
+                (isAnyInvoiceExpanded && expandedInvoiceData !== null) ? (
+                    <div className='overflow-y-scroll '>
+                        <ExpandedInvoiceCard
+                            invoiceData={expandedInvoiceData}
+                            formatDateForDisplay={formatDateForDisplay}
+                            theme={theme}
+                            handleClearDue={handleClearDue}
+                            isDeleting={isDeleting}
+                            handleGeneratePDF={handleGeneratePDF}
+                            prepareDataForEdit={prepareDataForEdit}
+                            prepareDataForDuplicate={prepareDataForDuplicate}
+                            handleDelete={handleDelete}
+                        />
+                    </div>
+                ) : (
+                    null
+                )}
+
+            {!isAnyInvoiceExpanded && (
+                <div className={`w-full ${containerClasses} ${isLight ? 'bg-gray-200' : 'bg-gray-700'}  h-fit overflow-y-scroll `}>
+
+
+                    <div className={`max-w-lg mx-auto pb-6  ${isLight ? 'bg-gray-200' : 'bg-gray-700'} `}>
+                        {renderStatus()}
+                        {!isLoading && !error && Object.keys(invoices).length === 0 && (
+                            <div className={`p-4 py-12 text-center ${isLight ? 'bg-gray-200' : 'bg-gray-700'} min-h-screen flex-col items-center align-middle max-w-lg mx-auto`}>
+                                <span role="img" aria-label="Empty" className="text-4xl block mb-3">
+                                    📭
+                                </span>
+                                <p className={`font-medium ${textClasses}`}>No records found with the selected filters.</p>
+                            </div>
+                        )}
+
+                        {!isLoading && !isAnyInvoiceExpanded && !error && Object.keys(invoices).map((monthYear) => {
+                            const [month, year] = monthYear.split('-');
+                            const monthName = new Date(year, month - 1).toLocaleString('default', { month: 'long' });
+                            const monthlyInvoices = invoices[monthYear];
+
+                            return (
+                                <div key={monthYear} className={` ${isLight ? 'bg-gray-200' : 'bg-gray-700'}`}>
+                                    <h2 className={`w-full flex justify-center items-center text-center pt-2 pb-1 ${isLight ? 'bg-gray-200 text-gray-500' : 'bg-gray-700 text-gray-300'}`}>{monthName} {year}</h2>
+
+                                    <div className={`mx-2 rounded-4xl overflow-clip ${isLight ? 'bg-gray-200' : 'bg-gray-700'}`}>
+                                        {!isLoading && !error && monthlyInvoices.map((invoice) => {
+
+                                            const summary = invoice.summary;
+
+                                            const balanceDue = parseFloat(summary.totalBalance || 0);
+                                            const isDue = balanceDue > 0.01;
+
+
+                                            // NEW: Construct the container type string
+
+
+
+                                            return (
+                                                <div key={invoice.id} className={`  rounded-xl transition-all duration-300 ${cardClasses} overflow-clip `}>
+
+                                                    {/* Header Button */}
+                                                    {/* <button
                                                     onClick={() => toggleExpand(invoice.id)}
                                                     className="w-full p-4 flex justify-between items-center text-left"
                                                 >
@@ -460,150 +549,34 @@ export default function History({ theme, onNavigateToForm }) {
                                                         {isExpanded ? <ChevronUp size={20} className={titleClasses} /> : <ChevronDown size={20} className={titleClasses} />}
                                                     </div>
                                                 </button> */}
-                                                <HistoryInvoiceCard
-                                                    invoice={invoice}
-                                                    isExpanded={isAnyInvoiceExpanded}
-                                                    setIsExpanded ={setIsAnyInvoiceExpanded}
-                                                    setExpandedId={setExpandedId}
-                                                    isLight={isLight}
-                                                    formatDateForDisplay={formatDateForDisplay}
-                                                    isDue={isDue}
-                                                    setPreviewData={setExpandedInvoiceData}
-                                                    previewData={expandedInvoiceData}
-                                                />
+                                                    <HistoryInvoiceCard
+                                                        invoice={invoice}
+                                                        isExpanded={isAnyInvoiceExpanded}
+                                                        setIsExpanded={setIsAnyInvoiceExpanded}
+                                                        setExpandedId={setExpandedId}
+                                                        isLight={isLight}
+                                                        isDue={isDue}
+                                                        formatDateForDisplay={formatDateForDisplay}
+                                                        setPreviewData={setExpandedInvoiceData}
+                                                        previewData={expandedInvoiceData}
+                                                    />
 
-                                                {/* --- EXPANDABLE CONTENT --- */}
-                                                {isAnyInvoiceExpanded && (
-                                                    <div className={`p-4 border-t ${isLight ? 'border-gray-300' : 'border-gray-600'} space-y-4`}>
+                                                    {/* --- EXPANDABLE CONTENT --- */}
 
-                                                        {/* 1. Trip Details (DD-MM-YYYY format applied, plus Container Type) */}
-                                                        <h4 className={`font-bold mt-2 ${titleClasses}`}>Trip & Load Details</h4>
-                                                        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                                                            <p className={`font-semibold ${subTextClasses}`}>Address:</p>
-                                                            <p className={`${subTextClasses}`}>{formData.partyAddress}</p>
-
-                                                            <p className={`font-semibold ${subTextClasses}`}>Load Type:</p>
-                                                            <p className={`${subTextClasses} `}>
-                                                                {containerTypeString}
-                                                            </p>
-
-                                                            <p className={`font-semibold ${subTextClasses}`}>Trip Route:</p>
-                                                            <p className={`${subTextClasses}`}>{formData.from} to {formData.to} to {formData.backTo}</p>
-
-                                                            <p className={`font-semibold ${subTextClasses}`}>Trip Dates:</p>
-                                                            <p className={`${subTextClasses}`}>
-                                                                {formatDateForDisplay(formData.loadingDate)} to {formatDateForDisplay(formData.unloadingDate)}
-                                                            </p>
-                                                        </div>
-
-                                                        {/* 2. Vehicles List with Detailed Charges (Updated 'commission' to 'warai') */}
-                                                        <h4 className={`font-bold pt-4 ${titleClasses}`}>Vehicles ({vehicles.length})</h4>
-                                                        <div className="space-y-3">
-                                                            {vehicles.map((v, index) => (
-                                                                <div key={index} className={`p-3 rounded-xl ${isLight ? 'bg-gray-100' : 'bg-gray-700'} text-xs border ${isLight ? 'border-gray-200' : 'border-gray-600'}`}>
-                                                                    <p className="font-semibold text-sm mb-2">{v.vehicleNo} (LR: {v.lrNo})</p>
-
-                                                                    {/* CHARGES BREAKDOWN */}
-                                                                    <div className="grid grid-cols-2 gap-1">
-                                                                        {['freight', 'unloadingCharges', 'detention', 'weightCharges', 'others', 'warai', 'advance'].map(field => (
-                                                                            <div key={field} className="flex justify-between col-span-1">
-                                                                                <p className="font-medium capitalize text-gray-500/70">{field.replace(/([A-Z])/g, ' $1').replace('warai', 'Warai').trim()}:</p>
-                                                                                <p className="font-semibold">{parseFloat(v[field]).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                                                                            </div>
-                                                                        ))}
-                                                                    </div>
-
-                                                                    <div className="mt-2 pt-2 border-t border-dashed flex justify-between">
-                                                                        <p className="font-extrabold text-red-500">Balance Due:</p>
-                                                                        <p className="font-extrabold text-red-500">₹{parseFloat(v.balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                                                                    </div>
-                                                                </div>
-                                                            ))}
-                                                        </div>
-
-                                                        {/* 3. Financial Summary (Unchanged) */}
-                                                        <div className={`mt-3 p-3 rounded-xl ${summaryHeaderClasses}`}>
-                                                            <h4 className="font-bold mb-2">Invoice Summary</h4>
-                                                            <div className="grid grid-cols-2 gap-2 text-sm">
-                                                                <p>Gross Freight:</p>
-                                                                <p className="font-bold text-right">₹{parseFloat(summary.totalFreight).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                                                                <p>Total Advance:</p>
-                                                                <p className="font-bold text-right">₹{parseFloat(summary.totalAdvance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
-                                                                <p className={`font-extrabold text-lg ${isDue ? 'text-red-400' : 'text-green-500'}`}>Balance Due:</p>
-                                                                <p className={`font-extrabold text-lg text-right ${isDue ? 'text-red-400' : 'text-green-500'}`}>₹{totalBalanceFormatted}</p>
-                                                            </div>
-                                                        </div>
-
-                                                        {/* --- PRIMARY ACTION BUTTONS: Clear Due / Generate PDF --- */}
-                                                        <div className="flex justify-between pt-4 space-x-4">
-                                                            {isDue ? (
-                                                                <button
-                                                                    onClick={() => handleClearDue(invoice.id, formData.partyName)}
-                                                                    disabled={isDeleting}
-                                                                    className={`flex-1 flex items-center justify-center bg-green-600 text-white px-6 py-3 rounded-2xl shadow-xl hover:bg-green-700 transition-all duration-300 text-lg font-semibold tracking-wide ${isDeleting ? 'opacity-70 cursor-not-allowed' : ''}`}
-                                                                >
-                                                                    {isDeleting ? <Loader2 size={20} className="animate-spin mr-2" /> : <CheckCircle size={20} className="mr-2" />}
-                                                                    {isDeleting ? 'Updating...' : 'Clear Due'}
-                                                                </button>
-                                                            ) : (
-                                                                <div className="flex-1 text-center py-3">
-                                                                    <p className="text-sm font-semibold text-green-500">PAID</p>
-                                                                </div>
-                                                            )}
-
-                                                            {/* GENERATE PDF BUTTON */}
-                                                            <button
-                                                                onClick={() => handleGeneratePDF(invoice)}
-                                                                className={`flex-1 bg-indigo-600 text-white px-6 py-3 rounded-2xl shadow-xl hover:bg-indigo-700 transition-all duration-300 text-lg font-semibold tracking-wide`}
-                                                            >
-                                                                Generate PDF
-                                                            </button>
-                                                        </div>
-
-                                                        {/* --- SECONDARY ACTION BUTTONS: Edit, Duplicate, Delete --- */}
-                                                        <div className={`flex justify-between pt-2 space-x-2 border-t ${isLight ? 'border-gray-200' : 'border-gray-700'}`}>
-
-                                                            <button
-                                                                onClick={() => prepareDataForEdit(invoice)}
-                                                                disabled={isDeleting}
-                                                                className={`flex-1 flex items-center justify-center bg-yellow-600 text-white px-3 py-2 rounded-xl shadow-md transition text-sm font-medium ${isDeleting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-yellow-700'}`}
-                                                            >
-                                                                <Edit size={16} className="mr-1" />
-                                                                Edit
-                                                            </button>
-
-                                                            <button
-                                                                onClick={() => prepareDataForDuplicate(invoice)}
-                                                                disabled={isDeleting}
-                                                                className={`flex-1 flex items-center justify-center bg-blue-600 text-white px-3 py-2 rounded-xl shadow-md transition text-sm font-medium ${isDeleting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-blue-700'}`}
-                                                            >
-                                                                <Copy size={16} className="mr-1" />
-                                                                Duplicate
-                                                            </button>
-
-                                                            <button
-                                                                onClick={() => handleDelete(invoice.id, formData.partyName)}
-                                                                disabled={isDeleting}
-                                                                className={`flex-1 flex items-center justify-center bg-red-600 text-white px-3 py-2 rounded-xl shadow-md transition text-sm font-medium ${isDeleting ? 'opacity-70 cursor-not-allowed' : 'hover:bg-red-700'}`}
-                                                            >
-                                                                <Trash2 size={16} className="mr-1" />
-                                                                Delete
-                                                            </button>
-                                                        </div>
-
-                                                    </div>
-                                                )}
-                                            </div>
-                                        );
-                                    })}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
                                 </div>
-                            </div>
-                        );
-                    })}
-                    {/* Render Invoices only if they exist and no error */}
+                            );
+                        })}
+                        {/* Render Invoices only if they exist and no error */}
 
+                    </div>
                 </div>
-            </div>
-        </>
+            )}
+
+
+        </div >
     );
 }

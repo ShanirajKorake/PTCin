@@ -1,7 +1,7 @@
 import { ArrowLeft, ArrowRight, Dot, MoveRight } from 'lucide-react'
 import React from 'react'
 
-export default function HistoryInvoiceCard({ invoice, setIsExpanded, isExpanded, setExpandedId, isLight, formatDateForDisplay, isDue, setPreviewData, previewData }) {
+export default function HistoryInvoiceCard({ invoice, setIsExpanded, isExpanded, setExpandedId, isLight, formatDateForDisplay, isDue, setPreviewData, resetScroll }) {
 
     const subTextClasses = isLight ? "text-gray-500" : "text-gray-500"
     const formatDateWithMonthName = (dateString) => {
@@ -13,12 +13,13 @@ export default function HistoryInvoiceCard({ invoice, setIsExpanded, isExpanded,
             <button
                 className={`w-full px-4 py-3  transition-colors`}
                 onClick={() => {
-                    setIsExpanded(prev => !prev);
-                    setExpandedId(invoice.id);
-
+                    
                     setPreviewData(prev =>
                         prev === null ? invoice : null
                     );
+                    setIsExpanded(prev => !prev);
+                    setExpandedId(invoice.id);
+
                 }}
             >
                 <p className={`text-sm flex items-center align-middle justify-center font-semibold text-left ${subTextClasses}`}>
@@ -32,11 +33,14 @@ export default function HistoryInvoiceCard({ invoice, setIsExpanded, isExpanded,
                 </p>
                 <div className={`w-full text-center text-lg  font-bold ${isLight ? "text-gray-700" : "text-gray-300"}`}>
                     {invoice.formData.partyName}
+                    <div className={`${isLight ? "text-gray-700" : "text-gray-500"}`}>{
+                        invoice.vehicles.map((v) => (v.vehicleNo + " "))
+                        }</div>
                 </div>
 
                 <div className='flex items-center align-middle'>
                     <div className='  flex align-middle items-center justify-center w-full '>
-                        <p className={`text-2xl pb-1 font-bold text-right ${isDue ? 'text-red-500' : 'line-through text-gray-500'}`}>{`Rs. ${invoice.summary.totalFreight}`}</p>
+                        <p className={`text-2xl pb-1 font-bold text-right ${isDue ? 'text-red-500' : 'line-through text-gray-500'}`}>{`Rs. ${isDue? invoice.summary.totalBalance : invoice.summary.totalFreight }`}</p>
                         {!isDue &&
                             <div className='flex'>
                                 <Dot size={24} className={subTextClasses} />
