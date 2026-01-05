@@ -96,6 +96,9 @@ export default function ExpandedInvoiceCard({ invoiceData, formatDateForDisplay,
                                     <span className={`text-md ${subTextClasses}`}>LR {v.lrNo}</span>
                                 }
                             </div>
+                            { v.containerNo != "" &&
+                                <span className={`text-sm ${subTextClasses}`}>Cont. No: {v.containerNo}</span>
+                            }
 
                             {/* Charges */}
                             <div className="grid grid-cols gap-x-3 text-sm">

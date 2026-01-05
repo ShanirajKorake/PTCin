@@ -133,14 +133,22 @@ export default function InvoicePDF({ formData, vehicles, theme, handleDone}) {
             const totalFreightAgg = vehicles.reduce((sum, v) => sum + parseFloat(v.totalFreight || 0), 0);
             const totalAdvanceAgg = vehicles.reduce((sum, v) => sum + parseFloat(v.advance || 0), 0);
             const totalBalanceAgg = vehicles.reduce((sum, v) => sum + parseFloat(v.balance || 0), 0);
+            
+            const formatCharge = (key) => {
+                const vals = vehicles.map(v => parseFloat(v[key]) || 0).filter(v => v > 0);
+                if (vals.length === 0) return 0;
+                return (vals.every(v => v === vals[0]) && vals.length > 1) 
+                    ? `${vals[0]} x ${vals.length}` 
+                    : vals.join(' + ');
+            };
 
             const aggregateCharges = {
-                Freight: vehicles.reduce((sum, v) => sum + parseFloat(v.freight || 0), 0),
-                Unloading: vehicles.reduce((sum, v) => sum + parseFloat(v.unloadingCharges || 0), 0),
-                Detention: vehicles.reduce((sum, v) => sum + parseFloat(v.detention || 0), 0),
-                Weight: vehicles.reduce((sum, v) => sum + parseFloat(v.weightCharges || 0), 0),
-                Others: vehicles.reduce((sum, v) => sum + parseFloat(v.others || 0), 0),
-                Warai: vehicles.reduce((sum, v) => sum + parseFloat(v.warai || 0), 0), 
+                Freight: formatCharge('freight'),
+                Unloading: formatCharge('unloadingCharges'),
+                Detention: formatCharge('detention'),
+                Weight: formatCharge('weightCharges'),
+                Others: formatCharge('others'),
+                Warai: formatCharge('warai'),
             };
 
             const charges = [
@@ -288,7 +296,7 @@ export default function InvoicePDF({ formData, vehicles, theme, handleDone}) {
 
             // Col 3 & 4: Charge Name and Amount
             row.push({ content: charge.label, styles: { fontSize: 10, fontStyle: 'normal', halign: 'left' } });
-            row.push({ content: charge.value.toFixed(2), styles: { halign: 'right', fontSize: 10, fontStyle: 'normal' } });
+            row.push({ content: charge.value, styles: { halign: 'right', fontSize: 10, fontStyle: 'normal' } });
 
             // Col 5, 6, 7: Totals (Only in the first row, spans N rows) - HIGHLIGHTED
             if (i === 0) {
