@@ -133,7 +133,7 @@ export default function InvoicePDF({ formData, vehicles, theme, handleDone}) {
             const totalFreightAgg = vehicles.reduce((sum, v) => sum + parseFloat(v.totalFreight || 0), 0);
             const totalAdvanceAgg = vehicles.reduce((sum, v) => sum + parseFloat(v.advance || 0), 0);
             const totalBalanceAgg = vehicles.reduce((sum, v) => sum + parseFloat(v.balance || 0), 0);
-            
+            console.log(vehicles);
             const formatCharge = (key) => {
                 const vals = vehicles.map(v => parseFloat(v[key]) || 0).filter(v => v > 0);
                 if (vals.length === 0) return 0;
@@ -150,6 +150,7 @@ export default function InvoicePDF({ formData, vehicles, theme, handleDone}) {
                 Others: formatCharge('others'),
                 Warai: formatCharge('warai'),
             };
+            console.log("aggregateCharges", aggregateCharges);
 
             const charges = [
                 { label: 'Freight', value: aggregateCharges.Freight },
@@ -158,7 +159,8 @@ export default function InvoicePDF({ formData, vehicles, theme, handleDone}) {
                 { label: 'Weight Ch.', value: aggregateCharges.Weight },
                 { label: 'Other Ch.', value: aggregateCharges.Others },
                 { label: 'Warai', value: aggregateCharges.Warai }, 
-            ].filter(c => c.value > 0 || c.label === 'Freight');
+            ].filter(c => c.value != "0" );
+            console.log("charges", charges);
 
             return { charges, totalFreightAgg, totalAdvanceAgg, totalBalanceAgg };
         };
